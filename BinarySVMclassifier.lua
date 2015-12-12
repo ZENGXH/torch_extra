@@ -25,14 +25,14 @@ function BinarySVMclassifier:updateOutput(input)
 --		print(self.weight:t())
 		local score = torch.mm(input_i, self.weight:t())
 		score:resize(1)
-		print(score[1])
+--		print(score[1])
 		if score[1]+self.bias[1] >= 0 then 
 			self.outputs[batch_i] = 1
 		else
 			self.outputs[batch_i] = -1
 		end
 	end
-	print('update output to be')
+--	print('update output to be')
 	return self.outputs
 end
 
@@ -58,21 +58,21 @@ function BinarySVMclassifier:accGradParameters(input, outputs,  target)
 	local subgradParameters = w.new():resizeAs(w):fill(0)
     for batch_i = 1, input:size(1) do
     	local subgradParameters_i = 0
-	print('grad parameters _i')
-	print(self.outputs)
-	print(target)
+--	print('grad parameters _i')
+--	print(self.outputs)
+--	print(target)
     	if self.outputs[batch_i] * target[batch_i] < thre then
 			subgradParameters_i = torch.mul(input[batch_i], - self.outputs[batch_i]) -- input[batch_i] 
 			-- outputs[batch_i] should be number
 			-- return [1, D] tensor
-			print(self.gradBias)
+--			print(self.gradBias)
 			self.gradBias[1] = self.gradBias[1] + 1
 		end
 		subgradParameters = subgradParameters + subgradParameters_i
 	end
-	print(1/input:size(1))
-	print(w)
-	print(subgradParameters)
+--	print(1/input:size(1))
+--	print(w)
+--	print(subgradParameters)
 	self.gradParameters = torch.mul(w, lambda) + torch.mul(subgradParameters,1/input:size(1) )
 	-- shape [1, D]
 	self.gradParameters = self.gradParameters
@@ -89,7 +89,7 @@ function BinarySVMclassifier:updateGradInput(input, gradOutput, target)
     local thre = 1
     local resize_flag = 0
     local target = gradOutput
-	print(target)
+--	print(target)
     if target:size():size() > 1 then
     	resize_flag = 1
     	target:resize(target:size(1))
@@ -98,14 +98,18 @@ function BinarySVMclassifier:updateGradInput(input, gradOutput, target)
     	local gradInput_i = w.new():resizeAs(w):fill(0)
 
     	if self.outputs[batch_i] * target[batch_i] < thre then
-		print('gard input _i')
-		print(target[batch_i])
-		print(w)
+--		print('gard input _i')
+--		print(target[batch_i])
+--		print(w)
     		-- gradInput_i = - target[batch_i] * w
     		gradInput_i = torch.mul(w,- target[batch_i])
-		local s = self.outputs[batch_i] * target[batch_i]
-		print(s)
-		f = f + torch.Tensor{1 - self.outputs[batch_i] * target[batch_i]}
+		local s = torch.Tensor{1 - self.outputs[batch_i] * target[batch_i]}
+--		print(s)
+--                print(f)
+		f = torch.Tensor{f[1] +  s[1]}
+                print('f update')
+		print(f)
+		-- f = f + torch.Tensor{1 - self.outputs[batch_i] * target[batch_i]}
     	end
     	self.gradInput[batch_i] = gradInput_i
     end
@@ -114,9 +118,9 @@ end
 function BinarySVMclassifier:backward(input, gradOutput, scale)
    f = torch.mm(self.weight, self.weight:t())
    f:resize(1)   
-   print('init f and gradOutput')
-   print(f)
-   print(gradOutput)
+--   print('init f and gradOutput')
+--   print(f)
+--   print(gradOutput)
    scale = scale or 1
    target = gradOutput
    self:updateGradInput(input, gradOutput, target)
