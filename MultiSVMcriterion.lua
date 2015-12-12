@@ -1,3 +1,4 @@
+-- based on noteds in http://cs231n.github.io/linear-classify/#softmax
 --[[ FOR testing
   outputs = torch.rand(5,4)
   outputs[{{},{1}}]  = 1-- batch:5, class 3
