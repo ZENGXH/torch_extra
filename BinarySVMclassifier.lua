@@ -66,7 +66,7 @@ function BinarySVMclassifier:accGradParameters(input, outputs,  target)
 			-- outputs[batch_i] should be number
 			-- return [1, D] tensor
 			print(self.gradBias)
-			self.gradBias[1] = self.gardBias[1] + 1
+			self.gradBias[1] = self.gradBias[1] + 1
 		end
 		subgradParameters = subgradParameters + subgradParameters_i
 	end
@@ -101,12 +101,17 @@ function BinarySVMclassifier:updateGradInput(input, gradOutput, target)
 		print(w)
     		-- gradInput_i = - target[batch_i] * w
     		gradInput_i = torch.mul(w,- target[batch_i])
+		f = f + torch.Tensor{1 - self.outputs[batch_i] * target[batch_i]}
     	end
     	self.gradInput[batch_i] = gradInput_i
     end
 end
 
 function BinarySVMclassifier:backward(input, gradOutput, scale)
+   f = torch.mm(self.weight, self.weight:t())
+   
+   print('init f')
+   print(f)
    scale = scale or 1
    target = gradOutput
    self:updateGradInput(input, gradOutput, target)
