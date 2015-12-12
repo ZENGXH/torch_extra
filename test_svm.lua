@@ -1,0 +1,11 @@
+dofile 'BinarySVMclassifier.lua'
+a = nn.BinarySVMclassifier(3)
+input = torch.rand(2,3)
+target = torch.Tensor(2):fill(1)
+output = a:forward(input)
+print('output')
+print(output)
+a:backward(input,target )
+a:parameters()
+--print(a.gardInput)
+--print(a.gardWeight)
