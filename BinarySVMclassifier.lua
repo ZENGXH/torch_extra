@@ -56,23 +56,26 @@ function BinarySVMclassifier:accGradParameters(input, outputs,  target)
 	self.gradParameters = w.new():resizeAs(w):fill(0) -- [1, D]
 	-- local subgradParameters = torch.Tensor(input:size(1)):fill(0)
 	local subgradParameters = w.new():resizeAs(w):fill(0)
+
     for batch_i = 1, input:size(1) do
     	local subgradParameters_i = 0
 --	print('grad parameters _i')
 --	print(self.outputs)
 --	print(target)
+
     	if self.outputs[batch_i] * target[batch_i] < thre then
 			subgradParameters_i = torch.mul(input[batch_i], - self.outputs[batch_i]) -- input[batch_i] 
 			-- outputs[batch_i] should be number
 			-- return [1, D] tensor
 --			print(self.gradBias)
 			self.gradBias[1] = self.gradBias[1] + 1
-		end
-		subgradParameters = subgradParameters + subgradParameters_i
 	end
+		subgradParameters = subgradParameters + subgradParameters_i
+    end
 --	print(1/input:size(1))
 --	print(w)
 --	print(subgradParameters)
+
 	self.gradParameters = torch.mul(w, lambda) + torch.mul(subgradParameters,1/input:size(1) )
 	-- shape [1, D]
 	self.gradParameters = self.gradParameters
@@ -90,15 +93,17 @@ function BinarySVMclassifier:updateGradInput(input, gradOutput, target)
     local resize_flag = 0
     local target = gradOutput
 --	print(target)
+
     if target:size():size() > 1 then
     	resize_flag = 1
     	target:resize(target:size(1))
     end
+
     for batch_i = 1, input:size(1) do
     	local gradInput_i = w.new():resizeAs(w):fill(0)
-
+        -- for support vector: 
     	if self.outputs[batch_i] * target[batch_i] < thre then
---		print('gard input _i')
+		print('support v')
 --		print(target[batch_i])
 --		print(w)
     		-- gradInput_i = - target[batch_i] * w

@@ -3,7 +3,7 @@ require 'optim'
 require 'nn'
 require 'save_model'
 require 'debugger'
-dofile('./BinarySVMclassifier.lua')
+dofile('./mulBinarySVMclassifier.lua')
 require"logging.file"
 date = ("2015_12_9")
 local logger = logging.file("/home/xizeng/mylog/pcml2_train%s.log", "%Y-%m-%d")
@@ -98,7 +98,7 @@ local model = nn.Sequential()
 -- load model from file
 model:add(dofile('models/'..opt.model..'.lua'))
 -- model:add(nn.Euclidean(4,4))
-model:add(nn.BinarySVMclassifier(4))
+model:add(nn.mulBinarySVMclassifier(36864))
 -- model:add(nn.MulConstant(-1))
 -- model:add(dofile('models/'..opt.model..'.lua'):cuda())
 -- model:get(2).updateGradInput = function(input) return end
@@ -193,7 +193,7 @@ function train()
    target_binary = targets.new():resizeAs(targets):fill(-1)
    target_binary[torch.eq(targets, 4)] = 1
    targets_ori = targets.new():resizeAs(targets):copy(targets)
-   targets = target_binary
+--   targets = target_binary
 
 
 --      local ground_truth = torch.FloatTensor(opt.batchSize,4):fill(0)
@@ -235,8 +235,8 @@ function train()
 --      print('start backward')
 --      print(df_do)
       model:backward(inputs, df_do)
-	print('get f?')
-	print(f)
+--	print('get f?')
+--	print(f)
 --    print(model.gradInput)
       -- confusion:batchAdd(outputs, targets)
 --      print(targets_ori)
@@ -247,8 +247,8 @@ function train()
       ground_truth[torch.eq(targets, -1)] = 2
 --      print(ground_truth)
 --      print(output_tran)
-
-      confusion:batchAdd(output_tran, ground_truth)
+	print(torch.sum(outputs))
+      confusion:batchAdd(outputs, targets)
       
             confusion:updateValids() 
       --      print(confusion.totalValid * 100)
