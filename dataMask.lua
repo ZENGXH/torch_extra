@@ -14,7 +14,7 @@ function dataMask:__init(height, width, stride, numOfMask)
     self.subheight = self.height / self.stride
     self.subwidth = self.width / self.stride
     self.gpuFlag = gpuFlag or false
-
+    
     if self.numOfMask == 4 then
         local i = 1
         for offsetx = 0,1 do
@@ -40,12 +40,16 @@ function dataMask:createMask(offsetx, offsety)
 end
 
 function dataMask:applyMask(image, mask)
+    if self.numOfMask == 1 then
+      return image
+    end
+
     assert(image:nDimension() == 3)
     local height = image:size(2)
     local width = image:size(3)
     assert(height == self.height)
     assert(width == self.width)
-
+    
     local img = image:clone():float()
     local subImg = torch.Tensor(self.subheight, self.subwidth):fill(0):float()
     local newimg = img:maskedSelect(mask):clone():resizeAs(subImg)
@@ -53,6 +57,10 @@ function dataMask:applyMask(image, mask)
 end
 
 function dataMask:recoverMask(originImg, mask, subimage)
+    if self.numOfMask == 1 then
+      return originImg
+    end
+
     local subimg = subimage:clone():float()
     -- local img = torch.Tensor(height, width):fill(0):float()
     originImg:maskedCopy(mask, subimg)
@@ -61,7 +69,9 @@ end
 
 
 function dataMask:quick4Mask3Dforward(originImg)
-   -- print(originImg:size())
+    if self.numOfMask == 1 then
+      return originImg
+    end
    assert(torch.isTensor(originImg))
    assert(originImg:nDimension() == 2 or originImg:nDimension() == 3)
    if originImg:nDimension() == 2 then
@@ -75,6 +85,7 @@ function dataMask:quick4Mask3Dforward(originImg)
    local newImage = torch.Tensor(self.imageFakeDepth, self.subheight, self.subwidth):float()
 
    for i = 1, 4 do
+
            local mask = self.maskList[i]
            local newSubImage = self:applyMask(originImg, mask)
            newImage[i] = newSubImage
@@ -82,9 +93,16 @@ function dataMask:quick4Mask3Dforward(originImg)
   return newImage
 end
 
-function dataMask:quick4Mask3Dbackward(subImage)
-   assert(subImage:nDimension() == 3)
+function dataMask:quick4Mask3Dbackward(subImage_in)
+--   print('backward image size:')
+   -- print(subImage_in:size())   
+   assert(subImage_in:nDimension() >= 3)
+   local subImage = subImage_in:clone()
+   if(subImage:nDimension() == 4) then
+        subImage = subImage:squeeze()
+  end
    -- sub image in size(4, height, width)
+
    assert(self.imageFakeDepth == subImage:size(1)) -- not really depth, can be regard as batchsize
    local originImg = torch.Tensor(1, self.height, self.width):float()
    for i = 1, 4 do

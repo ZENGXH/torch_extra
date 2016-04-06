@@ -1,17 +1,17 @@
 require 'torch'
 require 'nn'
-function saveModel(model,modelname, iter)
+function saveModel(modeldir, model,modelname, iter)
     --require 'torch'
     --require 'nn'
 	overlap = false
 	if overlap then
 		iter = 0
 	end
-	local dir = 'image/'
+
 
 	if true then
 		local emptymodel = model:clone('weight', 'bias'):float()
-		local filename = dir..modelname..'iter-'..tostring(iter)..'.bin' 
+		local filename = modeldir..modelname..'iter-'..tostring(iter)..'.bin' 
 		torch.save(filename, emptymodel)
 		print('current model is saved as')
 		print(filename)
