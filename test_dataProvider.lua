@@ -8,5 +8,15 @@ darasetSeq_valid = getdataSeq_hko('valid', data_path)
 index = 10
 sample = datasetSeq[index] 
 print(sample)
+
+inputTable = sample[1]
+targetTable = sample[2]
+print('intput table')
+print(inputTable)
+
+print('target Table')
+print(targetTable)
+
 sample = darasetSeq_valid[index]
+print('the same for valid seq')
 print(sample)

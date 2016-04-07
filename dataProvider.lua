@@ -15,7 +15,7 @@ function getdataSeq_hko(mode, data_path)
    -- local data_path = 
    -- data size (totalInstances or nsamples=2000?, sequence_length=20, 1, 64, 64)
    local datasetSeq ={}
-   gpuflag = gpuflag or false
+   gpuflag = opt.gpuflag or false
 
    if gpuflag then
       print('load data to gpu')
@@ -45,7 +45,7 @@ function getdataSeq_hko(mode, data_path)
    local nrows = opt.inputSizeH or nrows
    local ncols = opt.inputSizeW or nrows
    local nbatch = opt.batchSize or 1
-   local fakeDepth = opt.fakeDepth
+
    print (mode .. ' dataload: ' .. nsamples .. ' ' .. nseq .. ' ' .. nrows .. ' ' .. ncols )
 
    ------------- read the powerful txt file! ------
@@ -75,11 +75,6 @@ function getdataSeq_hko(mode, data_path)
    end
 
    local numsOfBatches = opt.numsOfBatches or torch.floor(nsamples / opt.batchSize) 
-
-   if mode == 'train' then
-      print('training data randperm')
-   else
-   end
 
    function datasetSeq:size()
       return nsamples
@@ -153,7 +148,6 @@ function getdataSeq_hko(mode, data_path)
       return inputTable, targetTable
    end
 
-   dsample = torch.Tensor(nbatch, nseq, fakeDepth, nrows, ncols) -- fakeDepth = 4
    -- dsample(20, 1, 64, 64)
    
    setmetatable(datasetSeq, {__index = function(self, index)
