@@ -1,4 +1,5 @@
-require 'image'require 'cunn'
+require 'image'
+
 local data_verbose = false
 
 if opt.appliedMask and dataMask == nil then
@@ -56,8 +57,8 @@ function getdataSeq_hko(mode, data_path)
       id = id + 1
    end
    assert(table.getn(fileList) == nseq * nsamples)
-   local ids = torch.range(nseq * nsamples)
-   seqHeads = torch.Tensor(nsamples)
+   local ids = torch.range(1, nseq * nsamples)
+   local seqHeads = torch.Tensor(nsamples)
 
    if mode == 'train' then
       print('training mode, shffule heads')
@@ -69,7 +70,7 @@ function getdataSeq_hko(mode, data_path)
    end   
 
    for i = 1, nsamples do
-      local seqHeads[i] = (shuffleID[i] - 1) * nseq + 1 
+      seqHeads[i] = (shuffleID[i] - 1) * nseq + 1 
       -- [1, 41, 121, 61, ..] index line number of first frame of the sequence of each samples
    end
 
@@ -119,33 +120,33 @@ function getdataSeq_hko(mode, data_path)
             local out = image.load(data_path..'data/'..fileList[lineInd])
             --local out = dataMask:quick4Mask3Dforward(ori)
             input_batch[batch_ind][k] = out:clone()
-            lineInd += selectStep
+            lineInd = lineInd + selectStep
          end
          ------------- output seq ------------
          for k = 1,  opt.output_nSeq do
             local out = image.load(data_path..'data/'..fileList[lineInd])
             --local out = dataMask:quick4Mask3Dforward(ori)
             output_batch[batch_ind][k] = out:clone()
-            lineInd += selectStep
+            lineInd = lineInd + selectStep
          end
          -- # TODO: make sure selectInd do not go out of bound[now mannuly?]
-         selectIndStart += 1 -- goto next minibatch
+         selectIndStart = selectIndStart + 1 -- goto next minibatch
       end
 
       ------------- make it a table -----------
       for k = 1, opt.input_nSeq do
          if gpuflag then
-            table.insert(inputTable, input_batch[{{}, {i}, {}, {}, {}}]:select(2,1):reshape(opt.batchSize, opt.imageDepth, opt.width, opt.width):cuda())
+            table.insert(inputTable, input_batch[{{}, {i}, {}, {}, {}}]:select(2,1):reshape(opt.batchSize, opt.imageDepth, opt.imageH, opt.imageW):cuda())
          else
-            table.insert(inputTable, input_batch[{{}, {i}, {}, {}, {}}]:select(2,1):reshape(opt.batchSize, opt.imageDepth, opt.width, opt.width))
+            table.insert(inputTable, input_batch[{{}, {i}, {}, {}, {}}]:select(2,1):reshape(opt.batchSize, opt.imageDepth, opt.imageH, opt.imageW))
          end
       end
 
        for k = 1, opt.output_nSeq do
          if gpuflag then
-            table.insert(targetTable, output_batch[{{}, {i}, {}, {}, {}}]:select(2,1):reshape(opt.batchSize, opt.imageDepth, opt.width, opt.width):cuda())
+            table.insert(targetTable, output_batch[{{}, {i}, {}, {}, {}}]:select(2,1):reshape(opt.batchSize, opt.imageDepth, opt.imageH, opt.imageW):cuda())
          else
-            table.insert(targetTable, output_batch[{{}, {i}, {}, {}, {}}]:select(2,1):reshape(opt.batchSize, opt.imageDepth, opt.width, opt.width))
+            table.insert(targetTable, output_batch[{{}, {i}, {}, {}, {}}]:select(2,1):reshape(opt.batchSize, opt.imageDepth, opt.imageH, opt.imageW))
          end
       end     
 
