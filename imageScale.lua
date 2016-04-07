@@ -34,13 +34,13 @@ function imageScale:updateOutput(input)
 			local subinput = input[k]
 			assert(subinput:nDimension() < 5)
 			if subinput:nDimension() == 3 or subinput:nDimension() == 2 then
-				output[k] = image.scale(subinput, self.height, self.width, self.mode):typeAs(input[1])
-			elseif input:nDimension() == 4 then
+				output[k] = image.scale(subinput, self.height, self.width, self.mode):typeAs(subinput)
+			elseif subinput:nDimension() == 4 then
 				local batchSize = subinput:size(1)
 				local depth = subinput:size(2)
 				output[k] = torch.Tensor(batchSize, depth, self.height, self.width)
 				for i = 1, batchSize do
-					output[k][i] = image.scale(subinput[i], self.height, self.width, self.mode):typeAs(input)
+					output[k][i] = image.scale(subinput[i], self.height, self.width, self.mode):typeAs(subinput)
 				end
 			end
 		end

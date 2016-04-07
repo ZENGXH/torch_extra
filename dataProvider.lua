@@ -109,7 +109,9 @@ function getdataSeq_hko(mode, data_path)
       for batch_ind = 1, opt.batchSize do -- filling one batch one by one
          -- start form the seqHeads, increment #selectStep line for each frame in when filling one sequence
          -- line index is ust for reading the #line of the file List, 
+
          lineInd = seqHeads[selectIndStart]
+
          ------------- input seq ------------
          for k = 1,  opt.input_nSeq do
             local out = image.load(data_path..'data/'..fileList[lineInd])
