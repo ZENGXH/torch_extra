@@ -20,7 +20,7 @@ def plotLoss(path, nameOfFile, average_interval):
         # tx = fil.read()
     #    visualization.visualize_loss(fil)
 
-    fileList = glob.glob(path + "*" +nameOfFile+ "*" )
+    fileList = glob.glob(path + nameOfFile)
     print(nameOfFile)
     print(fileList)
     for target_file in fileList:
@@ -45,27 +45,47 @@ def plotLoss(path, nameOfFile, average_interval):
         trainFigure = plt.figure(2)
 
         plt.figure(1)
+        record = 0
         for ind, line in enumerate(lines):
-            if "valid" in line:
+            if "valid"  in line:
                 continue
-            if "err" not in line:
+            if "acc" in line:
+                print(line)
                 continue
-            loss_num = line.split('err:\t')[1]
-            iter_num += 1
-            loss_list.append(float(loss_num))
-            iter_list.append(int(iter_num))
-            accum_loss += float(loss_num)
+            if "err" in line:
+                
+                loss_num = line.split('err:\t')[1].split('\t')[0]
+                iter_num += 1
+                print("---------", loss_num)
+                loss_list.append(float(loss_num))
+                iter_list.append(int(iter_num))
+                accum_loss += float(loss_num)
+                record = 1
+            elif nameOfFile == "out" and "average loss = " in line:
+                print(line)
+                loss_num = line.split('loss = ')[1]
+                loss_num = loss_num.split(' lr')[0]
+                print('>>>>>>>>',loss_num)
+                iter_num += 1
+                print(loss_num)
+                loss_list.append(float(loss_num))
+                iter_list.append(int(iter_num))
+                accum_loss += float(loss_num) 
+                record = 1
 
-            if 0 == (int(iter_num) % average_interval):
+            if record == 1 and 0 == (int(iter_num) % average_interval):
                 accum_loss_iter_list.append(int(iter_num))
                 accum_loss_list.append(float(accum_loss))
+                print('accum_loss is ', accum_loss)
                 accum_loss = 0
+                record = 0
         print('total training iter: ', iter_num)
         plt.xlabel('iteration number')
         plt.ylabel('training loss')
         plt.plot(accum_loss_iter_list[:], accum_loss_list[:])
         #print(accum_loss_list)
         title = nameOfFile + 'trainingLoss_ave'+ str(average_interval)  + '.png'
+        print("save as " + title)
         plt.title(title)
         plt.grid()
         plt.savefig(path + title)
@@ -89,10 +109,13 @@ def plotLoss(path, nameOfFile, average_interval):
 
         for ind, line in enumerate(lines):
             #print('.')
-            #if "validation" not  in line:
-            if "valid" and "score" not in line:
-                #print(line)
+            if "validation"  in line:
                 continue
+                #print(line)
+            if "valid" and "score"  not in line:
+            #if "valid" not in line:    
+                continue
+            print('valid::::', line)
             #print(line)
             #loss_num = line.split('is \t')[1]
             loss_num = line.split('score:\t')[1]
@@ -103,7 +126,7 @@ def plotLoss(path, nameOfFile, average_interval):
             iter_list.append(int(iter_num))
             accum_loss += float(loss_num)
 
-            if 0 == (int(iter_num) % 10):
+            if 0 == (int(iter_num) % 100):
                 accum_loss_iter_list.append(int(iter_num))
                 accum_loss_list.append(float(accum_loss))
                 accum_loss = 0
@@ -117,7 +140,7 @@ def plotLoss(path, nameOfFile, average_interval):
         plt.title(title)
         plt.grid()
         plt.savefig(path + title)
-        plt.show()
+        # plt.show()
         return
 
 if __name__ == "__main__":
@@ -129,7 +152,7 @@ if __name__ == "__main__":
         sys.exit(1)
     elif len(sys.argv) == 2: # only input name
         nameOfFile = sys.argv[1]
-        average_interval = 8000
+        average_interval = 800
     else: # also input interval
 
         nameOfFile = sys.argv[1]

@@ -17,13 +17,7 @@ function getdataSeq_hko(mode, data_path)
    local datasetSeq ={}
    gpuflag = opt.gpuflag or false
 
-   if gpuflag then
-      print('load data to gpu')
-      require 'cunn'
-      typeT = torch.Tensor():cuda()
-   else
-      typeT = torch.Tensor():float()
-   end
+
    -- data = data:float()/255.0 -- to range(0, 1)
 
    --------------- configuration: -----------------
@@ -132,19 +126,11 @@ function getdataSeq_hko(mode, data_path)
 
       ------------- make it a table -----------
       for k = 1, opt.input_nSeq do
-         if gpuflag then
-            table.insert(inputTable, input_batch[{{}, {i}, {}, {}, {}}]:select(2,1):reshape(opt.batchSize, opt.imageDepth, opt.imageH, opt.imageW):cuda())
-         else
-            table.insert(inputTable, input_batch[{{}, {i}, {}, {}, {}}]:select(2,1):reshape(opt.batchSize, opt.imageDepth, opt.imageH, opt.imageW))
-         end
+         table.insert(inputTable, input_batch[{{}, {i}, {}, {}, {}}]:select(2,1):reshape(opt.batchSize, opt.imageDepth, opt.imageH, opt.imageW))
       end
 
-       for k = 1, opt.output_nSeq do
-         if gpuflag then
-            table.insert(targetTable, output_batch[{{}, {i}, {}, {}, {}}]:select(2,1):reshape(opt.batchSize, opt.imageDepth, opt.imageH, opt.imageW):cuda())
-         else
-            table.insert(targetTable, output_batch[{{}, {i}, {}, {}, {}}]:select(2,1):reshape(opt.batchSize, opt.imageDepth, opt.imageH, opt.imageW))
-         end
+      for k = 1, opt.output_nSeq do
+         table.insert(targetTable, output_batch[{{}, {i}, {}, {}, {}}]:select(2,1):reshape(opt.batchSize, opt.imageDepth, opt.imageH, opt.imageW))
       end     
 
       return inputTable, targetTable
