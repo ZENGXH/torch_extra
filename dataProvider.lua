@@ -49,12 +49,16 @@ function getdataSeq_hko(mode, data_path)
    for line in f:lines() do
       fileList[id] = line
       id = id + 1
+      if id < 100 then
+         print(line)
+      end
    end
    assert(table.getn(fileList) == nseq * nsamples)
+
    local ids = torch.range(1, nseq * nsamples)
    local seqHeads = torch.Tensor(nsamples)
 
-   if mode == 'train' then
+   if mode == 'train--' then
       print('training mode, shffule heads')
       shuffleID = torch.randperm(nsamples) 
       -- range from 1 to numOfBatches, for shuffle purpose
@@ -65,6 +69,10 @@ function getdataSeq_hko(mode, data_path)
 
    for i = 1, nsamples do
       seqHeads[i] = (shuffleID[i] - 1) * nseq + 1 
+      --if i < 100 then
+      --   print('head :', seqHeads[i])
+      --   print(fileList[seqHeads[i]])
+      --end
       -- [1, 41, 121, 61, ..] index line number of first frame of the sequence of each samples
    end
 
@@ -109,10 +117,15 @@ function getdataSeq_hko(mode, data_path)
          ------------- input seq ------------
          for k = 1,  opt.input_nSeq do
             local out = image.load(data_path..'data/'..fileList[lineInd])
+            -- print('select start from ',  fileList[lineInd])
             --local out = dataMask:quick4Mask3Dforward(ori)
             input_batch[batch_ind][k] = out:clone()
             lineInd = lineInd + selectStep
+                        --epochSaveDir = 'image/testout/'..'train-epoch'..tostring(0)..'/'
+                        --image.save(epochSaveDir..fileList[lineInd],  out)
+
          end
+
          ------------- output seq ------------
          for k = 1,  opt.output_nSeq do
             local out = image.load(data_path..'data/'..fileList[lineInd])
@@ -126,12 +139,23 @@ function getdataSeq_hko(mode, data_path)
 
       ------------- make it a table -----------
       for k = 1, opt.input_nSeq do
-         table.insert(inputTable, input_batch[{{}, {i}, {}, {}, {}}]:select(2,1):reshape(opt.batchSize, opt.imageDepth, opt.imageH, opt.imageW))
+         table.insert(inputTable, input_batch[{{}, {k}, {}, {}, {}}]:select(2,1):reshape(opt.batchSize, opt.imageDepth, opt.imageH, opt.imageW))
       end
 
       for k = 1, opt.output_nSeq do
-         table.insert(targetTable, output_batch[{{}, {i}, {}, {}, {}}]:select(2,1):reshape(opt.batchSize, opt.imageDepth, opt.imageH, opt.imageW))
+         table.insert(targetTable, output_batch[{{}, {k}, {}, {}, {}}]:select(2,1):reshape(opt.batchSize, opt.imageDepth, opt.imageH, opt.imageW))
       end     
+
+         --for numsOfOut = 1, 3 do
+         --   print('----------------')
+         --   epochSaveDir = 'image/testout/'..'train-epoch'..tostring(0)..'/'
+         --   print(inputTable)
+         --   name = epochSaveDir..'00iter-'..tostring(index)..tostring(numsOfOut)..'.png'
+         --   print(name)
+         --   --saveImage(inputTable[n][1], '-aa-input'..n, index, 0, 'output')
+         --   image.save(name,  inputTable[numsOfOut][1])
+
+         --end      
 
       return inputTable, targetTable
    end
