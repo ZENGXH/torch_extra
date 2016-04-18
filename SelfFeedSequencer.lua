@@ -22,7 +22,7 @@ function SelfFeedSequencer:__init(module)
    self.modules = {self.module}
    
    self.output = {}
-   
+   self.flowOutput = {}
    -- table of buffers used for evaluation
    self._output = {}
    -- so that these buffers aren't serialized :
@@ -43,10 +43,13 @@ function SelfFeedSequencer:updateOutput(inputTable)
          self.module:forget()
       end
       self.output = {}
+      self.flowOutput = {}
+
       for step, input in ipairs(inputTable) do
          if step == 1 then
             -- print('mean of input', input)
             self.output[step] = self.module:updateOutput(input)
+
          else
              numinput = self.output[step - 1]
              -- print('mean',numinput:mean())
@@ -55,7 +58,11 @@ function SelfFeedSequencer:updateOutput(inputTable)
                self.module:updateOutput(numinput)
             )   
              -- print(self.output[step]:mean())
-         end        
+         end 
+         
+         self.flowOutput[step] = flowGridGenerator.output
+            --  print('===============  flow output collect  ===========')
+
       end
    else -- evaluation
       if not (self._remember == 'eval' or self._remember == 'both') then
@@ -84,6 +91,7 @@ function SelfFeedSequencer:updateOutput(inputTable)
          table.insert(self._output, self.output[i])
          self.output[i] = nil
       end
+
    end
    
    return self.output
@@ -144,6 +152,7 @@ function SelfFeedSequencer:training()
       for i,output in ipairs(self.output) do
          table.insert(self._output, output)
          self.output[i] = nil
+
       end
       -- forget at the start of each training
       self:forget()
