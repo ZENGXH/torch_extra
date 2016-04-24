@@ -20,7 +20,8 @@ function FastConvLSTM:__init(inputSize, outputSize, rho, kc, km, stride, batchSi
    self.i2g_kernel_size = kc or 3
    self.o2g_kernel_size = km or 3
    self.stride = stride or 1
-   
+   self.H = 30
+   self.W = self.H
    self.i2g_padding = math.floor(kc / 2) or 1
    self.o2g_padding = math.floor(km / 2) or 1
    self.rho = rho or 9999
@@ -28,6 +29,8 @@ function FastConvLSTM:__init(inputSize, outputSize, rho, kc, km, stride, batchSi
 end
 
 function FastConvLSTM:buildModel()
+  self.H = 30
+  self.W = 30
     print(self.inputSize, self.outputSize, self.kc, self.kc, self.stride, self.stride, self.padc, self.padc)
 
     print(self.inputSize, 4*self.outputSize, 
@@ -42,23 +45,31 @@ function FastConvLSTM:buildModel()
                                       self.stride, self.o2g_padding, self.o2g_padding)
 ]]
       self.i2g = nn.SpatialConvolution(self.inputSize, self.outputSize*4, self.kc, self.kc, self.stride, self.stride, self.padc, self.padc)
+
       self.o2g = nn.SpatialConvolution(self.outputSize, self.outputSize*4, self.km, self.km, self.stride, self.stride, self.padm, self.padm) 
+      print(self.o2g)
+      print('===========')
     if self.usenngraph then
 		  return self:nngraphModel()
 	  else
 		  -- return nn.ConvLSTM(self.inputSize, self.outputSize, self.rho, self.kc, self.km, self.stride, self.batchSize)
 ---------------------------------------
    local para = nn.ParallelTable():add(self.i2g):add(self.o2g)
-   local gates = nn.Sequential()
+
+   gates = nn.Sequential()
    gates:add(nn.NarrowTable(1,2))
    gates:add(para)
    gates:add(nn.CAddTable())
 
+
+
    -- Reshape to (batch_size, n_gates, hid_size)
    -- Then slize the n_gates dimension, i.e dimension 2
-   gates:add(nn.Reshape(4,self.outputSize))
-   gates:add(nn.SplitTable(1,2))
-   local transfer = nn.ParallelTable()
+   --print('reshape:: ')
+   --print(self.batchSize, 4, self.outputSize, self.H, self.W)
+   gates:add(nn.Reshape(self.batchSize, 4, self.outputSize, self.H, self.W))
+   gates:add(nn.SplitTable(2))
+   transfer = nn.ParallelTable()
    transfer:add(nn.Sigmoid()):add(nn.Tanh()):add(nn.Sigmoid()):add(nn.Sigmoid())
    gates:add(transfer)
 
@@ -127,7 +138,7 @@ function FastConvLSTM:nngraphModel()
    local h2h = self.o2g(prev_h):annotate{name='h2h'}
    local all_input_sums = nn.CAddTable()({i2h, h2h})
 
-   local reshaped = nn.Reshape(4, self.outputSize)(all_input_sums)
+   local reshaped = nn.Reshape(4, self.outputSize, self.H, self.W)(all_input_sums)
    -- input, hidden, forget, output
    local n1, n2, n3, n4 = nn.SplitTable(2)(reshaped):split(4)
    local in_gate = nn.Sigmoid()(n1)

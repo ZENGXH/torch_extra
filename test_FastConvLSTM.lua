@@ -5,16 +5,17 @@ require 'FastConvLSTM'
    local rnntest = {}
    local mytester = torch.Tester()
 function rnntest.lstm()
-   local lstmSize = 1
-   local batchSize = 4
+   local lstmSize_input = 5
+   local lstmSize_output = 3
+   local batchSize = 2
    local nStep = 3
    -- (inputSize, outputSize, rho, i2g_kernel_size, o2g_kernel_size, stride)
-   lstm1 = nn.FastConvLSTM(lstmSize, lstmSize, nStep, 3, 3, 1, batchSize) -- without nngraph
+   lstm1 = nn.FastConvLSTM(lstmSize_input, lstmSize_output, nStep, 3, 3, 1, batchSize) -- without nngraph
    local params1, gradParams1 = lstm1:getParameters()
    assert(torch.type(lstm1.recurrentModule) ~= 'nn.gModule')
    nn.FastConvLSTM.usenngraph = true
 
-   lstm2 = nn.FastConvLSTM(lstmSize, lstmSize, nStep, 3, 3, 1, batchSize)  -- with nngraph
+   lstm2 = nn.FastConvLSTM(lstmSize_input, lstmSize_output, nStep, 3, 3, 1, batchSize)  -- with nngraph
    nn.FastConvLSTM.usenngraph = false
    print(lstm2)
 
@@ -25,6 +26,7 @@ function rnntest.lstm()
    lstm2.i2g.weight:copy(lstm1.i2g.weight) 
    lstm2.i2g.bias:copy(lstm1.i2g.bias)
    lstm2.o2g.weight:copy(lstm1.o2g.weight)
+   lstm2.o2g.bias:copy(lstm1.o2g.bias)
    print('where fail:')
    print(params1[{{1, 10}}])
    print(params2[{{1, 10}}])
@@ -46,15 +48,15 @@ function rnntest.lstm()
    local H = 30
    local W = 30
    for step=1,nStep do
-      input[step] = torch.randn(batchSize, lstmSize, H, W)
-      gradOutput[step] = torch.randn(batchSize, lstmSize, H, W)
+      input[step] = torch.randn(batchSize, lstmSize_input, H, W)
+      gradOutput[step] = torch.randn(batchSize, lstmSize_output, H, W)
    end
    
    local rm1 = lstm1.recurrentModule
    local rm2 = lstm2.recurrentModule
    
-   local input_ = {input[1], torch.randn(batchSize, lstmSize, H, W), torch.randn(batchSize, lstmSize, H, W)}
-   local gradOutput_ = {gradOutput[1], torch.randn(batchSize, lstmSize, H, W)}
+   local input_ = {input[1], torch.randn(batchSize, lstmSize_output, H, W), torch.randn(batchSize, lstmSize_output, H, W)}
+   local gradOutput_ = {gradOutput[1], torch.randn(batchSize, lstmSize_output, H, W)}
    print('input:', input_)
 
    local output1 = rm1:forward(input_)
@@ -128,23 +130,37 @@ function rnntest.lstm()
    
    mytester:assertTensorEq(gradParams1, gradParams2, 0.000001, "FastConvLSTM nngraph gradParams err")
    --[[
-   if benchmark and pcall(function() require 'cunn' end ) then
-      local lstmSize = 128
-      local batchSize = 50
-      local nStep = 50
+   if benchmark and pcall(function() require 'cunn' end ) then]]
+      require 'cunn'
+      local lstmSize = 64
+      local batchSize = 5
+      local nStep = 10
    
       local input = {}
       local gradOutput = {}
+
       for step=1,nStep do
-         input[step] = torch.randn(batchSize, lstmSize, H, W):cuda()
-         gradOutput[step] = torch.randn(batchSize, lstmSize, H, W):cuda()
+         input[step] = torch.randn(batchSize, lstmSize_input, H, W):cuda()
+         gradOutput[step] = torch.randn(batchSize, lstmSize_output, H, W):cuda()
       end
       
+      --local rm1 = lstm1.recurrentModule
+      --local rm2 = lstm2.recurrentModule
+      
+      --local input_ = {input[1], torch.randn(batchSize, lstmSize_output, H, W), torch.randn(batchSize, lstmSize_output, H, W)}
+      --local gradOutput_ = {gradOutput[1], torch.randn(batchSize, lstmSize_output, H, W)}
+
+      
       nn.FastConvLSTM.usenngraph = false
-      local lstm1 = nn.Sequencer(nn.FastConvLSTM(lstmSize)):cuda()
+      local lstm1 = nn.Sequencer( nn.FastConvLSTM(lstmSize_input, 
+                                                lstmSize_output, 
+                                                nStep, 3, 3, 1, batchSize)):cuda()  -- with nngraph
+
+      -- local lstm1 = nn.Sequencer(nn.FastConvLSTM(lstmSize)):cuda()
       nn.FastConvLSTM.usenngraph = true
-      local lstm2 = nn.Sequencer(nn.FastConvLSTM(lstmSize)):cuda()
-      nn.FastConvLSTM.usenngraph = false
+      local lstm2 = nn.Sequencer( nn.FastConvLSTM(lstmSize_input, 
+                                                lstmSize_output, 
+                                                nStep, 3, 3, 1, batchSize)):cuda()      nn.FastConvLSTM.usenngraph = false
       -- nn
       
       local output = lstm1:forward(input)
@@ -160,19 +176,43 @@ function rnntest.lstm()
       
       local output = lstm2:forward(input)
       cutorch.synchronize()
+      -----------------------------
       local a = torch.Timer()
       for i=1,10 do
          lstm2:forward(input)
       end
       cutorch.synchronize()
       local nngraphtime = a:time().real
-      
-      print("Benchmark: nn vs nngraph time", nntime, nngraphtime)
-   end
-   ]]
+      ---------------------------------
+
+      require 'ConvLSTM'
+      local lstm3 = nn.Sequencer(nn.ConvLSTM(lstmSize_input, 
+         lstmSize_output, nStep, 3,3,1, batchSize)):cuda()
+
+      local output = lstm3:forward(input)
+      cutorch.synchronize()
+      local a = torch.Timer()
+      for i=1,10 do
+         lstm3:forward(input)
+      end
+      cutorch.synchronize()
+      local nntime_ori = a:time().real
+
+
+
+
+      print("Benchmark: nn vs nngraph time", nntime, nngraphtime, nntime_ori)
+   
+  
 end
 
-   
-   mytester:add(rnntest)
-   mytester:run(tests)
+-- function rnn.test(tests, benchmark_)
+-- benchmark = benchmark_ or nil
 
+mytester = torch.Tester()
+mytester:add(rnntest)
+-- math.randomseed(os.time())
+mytester:run()
+--runtest = torch.TestSuite()
+--runtest:run()
+-- run.test(runtest.lstm())
