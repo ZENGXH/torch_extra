@@ -1,3 +1,4 @@
+print(os.date("today is %c"))
 ------------------------------------------------------------------------
 --[[ Sequencer ]]--
 -- Encapsulates a Module. 
@@ -46,22 +47,27 @@ function SelfFeedSequencer:updateOutput(inputTable)
       self.flowOutput = {}
 
       for step, input in ipairs(inputTable) do
+      -- for step = 1,4 do
          if step == 1 then
-            -- print('mean of input', input)
+            print('input', input:size())
+            print('mean of input', input:mean())
+            -- self.module.step = 2
             self.output[step] = self.module:updateOutput(input)
-
          else
              numinput = self.output[step - 1]
-             -- print('mean',numinput:mean())
+             print('sequence input ',numinput:size())
+             print('mean or previous step',numinput:mean())
              self.output[step] = nn.rnn.recursiveCopy(
                self.output[step] or table.remove(self._output, 1), 
                self.module:updateOutput(numinput)
             )   
-             -- print(self.output[step]:mean())
+             print('mean of current step:', self.output[step]:mean())
          end 
          
-         self.flowOutput[step] = flowGridGenerator.output
-            --  print('===============  flow output collect  ===========')
+         if(flowGridGenerator) then
+            self.flowOutput[step] = flowGridGenerator.output
+         end
+         print('===============  flow output collect  ===========')
 
       end
    else -- evaluation
