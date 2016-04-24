@@ -39,6 +39,8 @@ function rnntest.lstm()
    local lstmSize_output = 13
    local batchSize = 2
    local nStep = 4
+   nn.FastConvLSTM.usenngraph = false
+
    -- (inputSize, outputSize, rho, i2g_kernel_size, o2g_kernel_size, stride)
    lstm1 = nn.FastConvLSTM(lstmSize_input, lstmSize_output, nStep, 3, 3, 1, batchSize) -- without nngraph
    local params1, gradParams1 = lstm1:getParameters()
@@ -49,6 +51,7 @@ function rnntest.lstm()
    nn.FastConvLSTM.usenngraph = false
    print(lstm2)
 
+graph.dot(lstm2.fg, 'MLP')
 
    local params2, gradParams2 = lstm2:getParameters()
    assert(torch.type(lstm2.recurrentModule) == 'nn.gModule')
@@ -137,6 +140,10 @@ function rnntest.lstm()
    -- forward/backward
    local output1 = seq1:forward(input)
    local gradInput1 = seq1:backward(input, gradOutput)
+   graph.dot(seq1.fg, 'lstm')
+
+
+
    local output2 = seq2:forward(input)
    local gradInput2 = seq2:backward(input, gradOutput)
    

@@ -10,15 +10,13 @@ require 'ConvLSTM'
 require 'dpnn'
 require 'rnn'
 local FastConvLSTM, parent = torch.class("nn.FastConvLSTM", "nn.ConvLSTM")
-FastConvLSTM.usenngraph = false
+
+FastConvLSTM.usenngraph = true -- dafault to be true
 
 function FastConvLSTM:__init(inputSize, outputSize, rho, kc, km, stride, batchSize, hight, width)
   self.H = hight or 50
   self.W = width or 50
-
    -- (inputSize, outputSize, rho, kc, km, stride, batchSize)
-  print(i2g_kernel_size)
-  print('---')
   self.kc = kc or 3
   self.km = km or 3
   self.stride = stride or 1
@@ -33,25 +31,8 @@ function FastConvLSTM:__init(inputSize, outputSize, rho, kc, km, stride, batchSi
 end
 
 function FastConvLSTM:buildModel()
-
-    print(self.inputSize, self.outputSize, self.kc, self.kc, self.stride, self.stride, self.padc, self.padc)
-
-    print(self.inputSize, 4*self.outputSize, 
-                                      self.i2g_kernel_size, self.i2g_kernel_size, self.stride, 
-                                      self.stride, self.i2g_padding, self.i2g_padding)
---[[
-    self.i2g = nn.SpatialConvolution(self.inputSize, 4*self.outputSize, 
-                                      self.i2g_kernel_size, self.i2g_kernel_size, self.stride, 
-                                      self.stride, self.i2g_padding, self.i2g_padding)
-    self.o2g = nn.SpatialConvolution(self.outputSize, 4*self.outputSize,
-                                      self.o2g_kernel_size, self.o2g_kernel_size, self.stride, 
-                                      self.stride, self.o2g_padding, self.o2g_padding)
-]]
       self.i2g = nn.SpatialConvolution(self.inputSize, self.outputSize*4, self.kc, self.kc, self.stride, self.stride, self.padc, self.padc)
-
       self.o2g = nn.SpatialConvolution(self.outputSize, self.outputSize*4, self.km, self.km, self.stride, self.stride, self.padm, self.padm) 
-      print(self.o2g)
-      print('===========')
     if self.usenngraph then
 		  return self:nngraphModel()
 	  else
@@ -64,8 +45,6 @@ function FastConvLSTM:buildModel()
    gates:add(nn.NarrowTable(1,2))
    gates:add(para)
    gates:add(nn.CAddTable())
-
-
 
    -- Reshape to (batch_size, n_gates, hid_size)
    -- Then slize the n_gates dimension, i.e dimension 2
@@ -128,7 +107,7 @@ end
 -- rho, kc, km, stride, batchSize
 
 function FastConvLSTM:nngraphModel()
-    print('using nn graph')
+   print('using nn graph')
    assert(nngraph, "Missing nngraph package")
    
    local inputs = {}
@@ -160,6 +139,7 @@ function FastConvLSTM:nngraphModel()
    local next_h = nn.CMulTable()({out_gate, nn.Tanh()(next_c)})
 
    local outputs = {next_h, next_c}
-   
-   return nn.gModule(inputs, outputs)
+   mlp = nn.gModule(inputs, outputs)
+
+   return mlp
 end
