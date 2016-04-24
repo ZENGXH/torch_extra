@@ -12,25 +12,28 @@ require 'rnn'
 local FastConvLSTM, parent = torch.class("nn.FastConvLSTM", "nn.ConvLSTM")
 FastConvLSTM.usenngraph = false
 
-function FastConvLSTM:__init(inputSize, outputSize, rho, kc, km, stride, batchSize)
-   parent.__init(self, inputSize, outputSize, rho, kc, km, stride, batchSize)
+function FastConvLSTM:__init(inputSize, outputSize, rho, kc, km, stride, batchSize, hight, width)
+  self.H = hight or 50
+  self.W = width or 50
+
    -- (inputSize, outputSize, rho, kc, km, stride, batchSize)
-   print(i2g_kernel_size)
-   print('---')
-   self.i2g_kernel_size = kc or 3
-   self.o2g_kernel_size = km or 3
-   self.stride = stride or 1
-   self.H = 30
-   self.W = self.H
-   self.i2g_padding = math.floor(kc / 2) or 1
-   self.o2g_padding = math.floor(km / 2) or 1
-   self.rho = rho or 9999
+  print(i2g_kernel_size)
+  print('---')
+  self.kc = kc or 3
+  self.km = km or 3
+  self.stride = stride or 1
+  self.inputSize = inputSize
+  self.outputSize = outputSize
+  self.batchSize = batchSize
+  self.i2g_padding = math.floor(kc / 2) or 1
+  self.o2g_padding = math.floor(km / 2) or 1
+  self.rho = rho or 9999
+  parent.__init(self, self.inputSize, self.outputSize, self.rho, self.kc, self.km, self.stride, self.batchSize)
 
 end
 
 function FastConvLSTM:buildModel()
-  self.H = 30
-  self.W = 30
+
     print(self.inputSize, self.outputSize, self.kc, self.kc, self.stride, self.stride, self.padc, self.padc)
 
     print(self.inputSize, 4*self.outputSize, 
@@ -54,6 +57,7 @@ function FastConvLSTM:buildModel()
 	  else
 		  -- return nn.ConvLSTM(self.inputSize, self.outputSize, self.rho, self.kc, self.km, self.stride, self.batchSize)
 ---------------------------------------
+    print('not using nn graph')
    local para = nn.ParallelTable():add(self.i2g):add(self.o2g)
 
    gates = nn.Sequential()
@@ -124,6 +128,7 @@ end
 -- rho, kc, km, stride, batchSize
 
 function FastConvLSTM:nngraphModel()
+    print('using nn graph')
    assert(nngraph, "Missing nngraph package")
    
    local inputs = {}
