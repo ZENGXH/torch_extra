@@ -4,6 +4,35 @@ require 'rnn'
 require 'FastConvLSTM'
    local rnntest = {}
    local mytester = torch.Tester()
+onMac = false
+
+if not onMac then
+   require 'cunn'
+   require 'cutorch'
+   cutorch.setHeapTracking(true)
+    cutorch.setDevice(1)
+    local gpuid = 1
+   local freeMemory, totalMemory = cutorch.getMemoryUsage(1)
+   print('free',freeMemory/(1024^3))
+   local freeMemory2, totalMemory = cutorch.getMemoryUsage(2)
+   print('free2',freeMemory2/(1024^3))
+   if(freeMemory2 > freeMemory) then 
+      cutorch.setDevice(2)
+      gpuid = 2
+   end
+end
+
+function checkMemory(message) 
+   if not onMac then
+      print(message)
+      local freeMemory, totalMemory = cutorch.getMemoryUsage(gpuid)
+      print('free',freeMemory/(1024^3))
+   end
+end
+
+
+
+
 function rnntest.lstm()
    local lstmSize_input = 5
    local lstmSize_output = 3
@@ -129,9 +158,10 @@ function rnntest.lstm()
    end
    
    mytester:assertTensorEq(gradParams1, gradParams2, 0.000001, "FastConvLSTM nngraph gradParams err")
-   --[[
-   if benchmark and pcall(function() require 'cunn' end ) then]]
-      require 'cunn'
+      if not onMac then
+         require 'cunn'
+      end
+
       local lstmSize = 64
       local batchSize = 5
       local nStep = 10
@@ -140,8 +170,8 @@ function rnntest.lstm()
       local gradOutput = {}
 
       for step=1,nStep do
-         input[step] = torch.randn(batchSize, lstmSize_input, H, W):cuda()
-         gradOutput[step] = torch.randn(batchSize, lstmSize_output, H, W):cuda()
+         input[step] = torch.randn(batchSize, lstmSize_input, H, W)--:cuda()
+         gradOutput[step] = torch.randn(batchSize, lstmSize_output, H, W)--:cuda()
       end
       
       --local rm1 = lstm1.recurrentModule
@@ -154,54 +184,88 @@ function rnntest.lstm()
       nn.FastConvLSTM.usenngraph = false
       local lstm1 = nn.Sequencer( nn.FastConvLSTM(lstmSize_input, 
                                                 lstmSize_output, 
-                                                nStep, 3, 3, 1, batchSize)):cuda()  -- with nngraph
+                                                nStep, 3, 3, 1, batchSize))--:cuda()  -- with nngraph
 
       -- local lstm1 = nn.Sequencer(nn.FastConvLSTM(lstmSize)):cuda()
       nn.FastConvLSTM.usenngraph = true
       local lstm2 = nn.Sequencer( nn.FastConvLSTM(lstmSize_input, 
                                                 lstmSize_output, 
-                                                nStep, 3, 3, 1, batchSize)):cuda()      nn.FastConvLSTM.usenngraph = false
+                                                nStep, 3, 3, 1, batchSize))--:cuda()      
+      nn.FastConvLSTM.usenngraph = false
       -- nn
-      
+
+      require 'ConvLSTM'
+      local lstm3 = nn.Sequencer(nn.ConvLSTM(lstmSize_input, 
+         lstmSize_output, nStep, 3,3,1, batchSize))--:cuda()
+
+      if onMac then
+         print(gradOutput)
+         out = lstm1:forward(input)
+         print(out)
+         lstm1:updateGradInput(input, gradOutput)
+         --lstm1:backward(gradOutput)
+         lstm2:forward(input)
+         lstm2:updateGradInput(input, gradOutput)
+         -- lstm2:backward(gradOutput)  
+         lstm3:forward(input)
+         lstm3:updateGradInput(input, gradOutput)
+         -- lstm3:backward(gradOutput)
+      end
+      lstm1:remember('both')
+      lstm1:training()
+      lstm2:remember('both')
+      lstm2:training()
+      lstm3:remember('both')
+      lstm3:training()
+
+
+
+      ------------------------------
       local output = lstm1:forward(input)
       cutorch.synchronize()
+checkMemory('before lstm1')      
       local a = torch.Timer()
       for i=1,10 do
          lstm1:forward(input)
+         lstm1:updateGradInput(input, gradOutput)
       end
+checkMemory('after lstm1')
+    
       cutorch.synchronize()
       local nntime = a:time().real
       
       -- nngraph
-      
+      -----------------------------
       local output = lstm2:forward(input)
       cutorch.synchronize()
-      -----------------------------
+checkMemory('before lstm2') 
       local a = torch.Timer()
       for i=1,10 do
          lstm2:forward(input)
+         lstm2:updateGradInput(input, gradOutput)
       end
+checkMemory('after lstm2')
       cutorch.synchronize()
       local nngraphtime = a:time().real
       ---------------------------------
 
-      require 'ConvLSTM'
-      local lstm3 = nn.Sequencer(nn.ConvLSTM(lstmSize_input, 
-         lstmSize_output, nStep, 3,3,1, batchSize)):cuda()
 
       local output = lstm3:forward(input)
       cutorch.synchronize()
+checkMemory('before lstm3')
       local a = torch.Timer()
       for i=1,10 do
          lstm3:forward(input)
+         lstm3:updateGradInput(input, gradOutput)
       end
+checkMemory('after lstm3')
       cutorch.synchronize()
       local nntime_ori = a:time().real
 
 
 
 
-      print("Benchmark: nn vs nngraph time", nntime, nngraphtime, nntime_ori)
+      print("Benchmark: nn vs nngraph time vs ori", nntime, nngraphtime, nntime_ori)
    
   
 end
