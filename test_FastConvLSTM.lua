@@ -4,9 +4,10 @@ require 'rnn'
 require 'FastConvLSTM'
    local rnntest = {}
    local mytester = torch.Tester()
-onMac = false
-
+onMac = true
+typeTensor = torch.Tensor():float()
 if not onMac then
+   typeTensor:cuda()
    require 'cunn'
    require 'cutorch'
    cutorch.setHeapTracking(true)
@@ -157,7 +158,7 @@ function rnntest.lstm()
       mytester:assertTensorEq(gp1[i], gp2[i], 0.000001, "FastConvLSTM nngraph gradParam err "..i)
    end
    
-   mytester:assertTensorEq(gradParams1, gradParams2, 0.000001, "FastConvLSTM nngraph gradParams err")
+      mytester:assertTensorEq(gradParams1, gradParams2, 0.000001, "FastConvLSTM nngraph gradParams err")
       if not onMac then
          require 'cunn'
       end
@@ -170,8 +171,8 @@ function rnntest.lstm()
       local gradOutput = {}
 
       for step=1,nStep do
-         input[step] = torch.randn(batchSize, lstmSize_input, H, W):cuda()
-         gradOutput[step] = torch.randn(batchSize, lstmSize_output, H, W):cuda()
+         input[step] = torch.randn(batchSize, lstmSize_input, H, W):type(typeTensor:type())
+         gradOutput[step] = torch.randn(batchSize, lstmSize_output, H, W):type(typeTensor:type())
       end
       
       --local rm1 = lstm1.recurrentModule
@@ -184,19 +185,19 @@ function rnntest.lstm()
       nn.FastConvLSTM.usenngraph = false
       local lstm1 = nn.Sequencer( nn.FastConvLSTM(lstmSize_input, 
                                                 lstmSize_output, 
-                                                nStep, 3, 3, 1, batchSize)):cuda()  -- with nngraph
+                                                nStep, 3, 3, 1, batchSize)):type(typeTensor:type())  -- with nngraph
 
       -- local lstm1 = nn.Sequencer(nn.FastConvLSTM(lstmSize)):cuda()
       nn.FastConvLSTM.usenngraph = true
       local lstm2 = nn.Sequencer( nn.FastConvLSTM(lstmSize_input, 
                                                 lstmSize_output, 
-                                                nStep, 3, 3, 1, batchSize)):cuda()      
+                                                nStep, 3, 3, 1, batchSize)):type(typeTensor:type())      
       nn.FastConvLSTM.usenngraph = false
       -- nn
 
       require 'ConvLSTM'
       local lstm3 = nn.Sequencer(nn.ConvLSTM(lstmSize_input, 
-         lstmSize_output, nStep, 3,3,1, batchSize)):cuda()
+         lstmSize_output, nStep, 3,3,1, batchSize)):type(typeTensor:type())      
 
       if onMac then
          print(gradOutput)
