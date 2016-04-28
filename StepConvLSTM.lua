@@ -31,22 +31,81 @@ require 'rnn'
 local StepConvLSTM, parent = torch.class('nn.StepConvLSTM', 'nn.Container')
 
 function StepConvLSTM:__init(inputSize, outputSize, rho, kernelSizeIn, kernelSizeMem, stride, batchSize, height, width)
-   parent.__init(self)
-   self.inputSize = inputSize
-   self.outputSize = outputSize
 
-   self.kernelSizeIn = kernelSizeIn or 3
-   self.kernelSizeMem = kernelSizeMem or 3
-   self.padIn = torch.floor(self.kernelSizeIn/2)
-   self.padMem = torch.floor(self.kernelSizeMem/2)
+    parent.__init(self)
+    self.inputSize = inputSize
+    self.outputSize = outputSize
 
-   self.stride = stride or 1
-   assert(batchSize, 'input are required in batchMode')    -- to reduce the complexity
-   self.batchSize = batchSize or 1 
-   assert(height, 'we are sad about this, but fast lstm need size of image ')
-   assert(width, 'we are sad about this, but fast lstm need size of image ')
-   self.H = height
-   self.W = width
+    self.kernelSizeIn = kernelSizeIn or 3
+    self.kernelSizeMem = kernelSizeMem or 3
+    self.padIn = torch.floor(self.kernelSizeIn/2)
+    self.padMem = torch.floor(self.kernelSizeMem/2)
+
+    self.stride = stride or 1
+    assert(batchSize, 'input are required in batchMode')    -- to reduce the complexity
+    self.batchSize = batchSize or 1 
+    assert(height, 'we are sad about this, but fast lstm need size of image ')
+    assert(width, 'we are sad about this, but fast lstm need size of image ')
+    self.H = height
+    self.W = width
+    self.step = 1
+
+    self.modules[1] = buildModel()
+
+    local D, N, H, W = self.inputSize, self.outputSize, self.H, self.W
+    -- pre-allocate all the parameters
+    self.weight = torch.Tensor(D + H, 4 * H) 
+    self.gradWeight = torch.Tensor(D + H, 4 * H):zero()
+    self.bias = torch.Tensor(4 * H)
+    self.gradBias = torch.Tensor(4 * H):zero()
+    self:weightInit(method)
+
+    self.prevOutput = torch.Tensor()
+    self.prevCell = torch.Tensor()    -- This will be (N, T, H)
+    self.gates = torch.Tensor()   -- This will be (N, T, 4H)
+    self.buffer1 = torch.Tensor() -- This will be (N, H)
+    self.buffer2 = torch.Tensor() -- This will be (N, H)
+    self.buffer3 = torch.Tensor() -- This will be (1, 4H)
+    self.grad_a_buffer = torch.Tensor() -- This will be (N, 4H)
+
+    self.h0 = torch.Tensor()
+    self.c0 = torch.Tensor()
+    self.remember_states = false
+
+    self.grad_c0 = torch.Tensor()
+    self.grad_h0 = torch.Tensor()
+    self.grad_x = torch.Tensor()
+    self.gradInput = {self.grad_c0, self.grad_h0, self.grad_x}
+    self.output = torch.Tensor()
+
+    ---
+end
+
+function clearState()
+  print('clear state of LSTM:')
+  -- normal clear:
+  self.modules[1]:clearState()
+  assert(self.modules[1].output ~= nil)
+  assert(self.modules[1].gradInput ~= nil)
+
+  -- forget previous
+  self.prevOutput = self.prevOutput:new()
+  self.prevCell = self.prevCell:new()
+
+  -- TODO: COLLECT GABAGE?
+  -- TODO: ANYTHING else?
+end
+
+
+function StepConvLSTM:weightInit(method)
+  local method = method or nil
+  if not method then
+    method = 'xiva...?'
+  else
+    method = 'gaussian'
+  end
+  -- TODO:...
+  print('not implement: weightInit')
 end
 
 function StepConvLSTM:prepareGate()
@@ -58,6 +117,7 @@ function StepConvLSTM:prepareGate()
                                   self.kernelSizeMem, self.kernelSizeMem, 
                                   self.stride, self.stride, 
                                   self.padMem, self.padMem)  
+  -- TODO: USE NO BIAS CONV
 end
 -- put them in self for convinence of debugging
 
@@ -187,37 +247,14 @@ function StepConvLSTM:updateOutput(input)
       self.zeroTensor:resize(self.batchSize, self.outputSize, input:size(3), input:size(4)):zero()
       -- to be deleted, to reduce complexity all in batch mode
    else
-      -- previous output and memory of this module
-      -- prevOutput = self.output
-      -- prevCell   = self.cell
-   end
       
    -- output(t), cell(t) = lstm{input(t), output(t-1), cell(t-1)}
-   local output, cell
+   local cell -- cell do not output
+   self.output, cell = self.modules[1]:updateOutput{input, self.prevOutput, self.prevCell}
+   self.prevCell = cell
+   self.prevOutput = output
 
-   if self.train ~= false then
-      -- self:recycle()
-      -- local recurrentModule = self:getStepModule(self.step)
-      if verbose then
-         print('self.step of StepConvLSTM is ',self.step,recurrentModule)
-      end
-      -- the actual forward propagation
-      output, cell = unpack(recurrentModule:updateOutput{input, prevOutput, prevCell})
-   else
-      output, cell = unpack(self.recurrentModule:updateOutput{input, prevOutput, prevCell})
-   end
-   
-   self.outputs[self.step] = output
-   self.cells[self.step] = cell
-   
-   self.output = output
-   self.cell = cell
-   
    self.step = self.step + 1
-   self.gradPrevOutput = nil
-   self.updateGradInputStep = nil
-   self.accGradParametersStep = nil
-   self.gradParametersAccumulated = false
    -- note that we don't return the cell, just the output
    return self.output
 end
