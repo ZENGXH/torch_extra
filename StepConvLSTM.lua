@@ -30,12 +30,15 @@ require 'rnn'
 
 local StepConvLSTM, parent = torch.class('nn.StepConvLSTM', 'nn.Container')
 
-function StepConvLSTM:__init(inputSize, outputSize, rho, kernelSizeIn, kernelSizeMem, stride, batchSize, height, width)
+function StepConvLSTM:__init(inputSize, outputSize, bufferStep, kernelSizeIn, kernelSizeMem, stride, batchSize, height, width)
 
     parent.__init(self)
     self.inputSize = inputSize
     self.outputSize = outputSize
+    self.bufferStep = self.bufferStep 
+    -- the gates will store the #bufferStep data, also the maximum step for backward
 
+    self.gates = torch.Tensor() -- will be [batch/
     self.kernelSizeIn = kernelSizeIn or 3
     self.kernelSizeMem = kernelSizeMem or 3
     self.padIn = torch.floor(self.kernelSizeIn/2)
@@ -46,16 +49,17 @@ function StepConvLSTM:__init(inputSize, outputSize, rho, kernelSizeIn, kernelSiz
     self.batchSize = batchSize or 1 
     assert(height, 'we are sad about this, but fast lstm need size of image ')
     assert(width, 'we are sad about this, but fast lstm need size of image ')
-    self.H = height
-    self.W = width
+    self.height = height
+    self.width = width
     self.step = 1
 
     self.modules[1] = buildModel()
 
-    local D, N, H, W = self.inputSize, self.outputSize, self.H, self.W
+    local D, H, height, width = self.inputSize, self.outputSize, self.height, self.width
     -- pre-allocate all the parameters
     self.weight = torch.Tensor(D + H, 4 * H) 
     self.gradWeight = torch.Tensor(D + H, 4 * H):zero()
+
     self.bias = torch.Tensor(4 * H)
     self.gradBias = torch.Tensor(4 * H):zero()
     self:weightInit(method)
@@ -63,9 +67,9 @@ function StepConvLSTM:__init(inputSize, outputSize, rho, kernelSizeIn, kernelSiz
     self.prevOutput = torch.Tensor()
     self.prevCell = torch.Tensor()    -- This will be (N, T, H)
     self.gates = torch.Tensor()   -- This will be (N, T, 4H)
-    self.buffer1 = torch.Tensor() -- This will be (N, H)
-    self.buffer2 = torch.Tensor() -- This will be (N, H)
-    self.buffer3 = torch.Tensor() -- This will be (1, 4H)
+    -- self.buffer1 = torch.Tensor() -- This will be (N, H)
+    -- self.buffer2 = torch.Tensor() -- This will be (N, H)
+    -- self.buffer3 = torch.Tensor() -- This will be (1, 4H)
     self.grad_a_buffer = torch.Tensor() -- This will be (N, 4H)
 
     self.h0 = torch.Tensor()
@@ -81,7 +85,7 @@ function StepConvLSTM:__init(inputSize, outputSize, rho, kernelSizeIn, kernelSiz
     ---
 end
 
-function clearState()
+function StepConvLSTM:clearState()
   print('clear state of LSTM:')
   -- normal clear:
   self.modules[1]:clearState()
@@ -117,6 +121,7 @@ function StepConvLSTM:prepareGate()
                                   self.kernelSizeMem, self.kernelSizeMem, 
                                   self.stride, self.stride, 
                                   self.padMem, self.padMem)  
+  -- self.preGate = nn.ParallelTable():add(self.i2g):add(self.o2g)
   -- TODO: USE NO BIAS CONV
 end
 -- put them in self for convinence of debugging
@@ -139,8 +144,8 @@ function StepConvLSTM:buildModel()
 
       -- Reshape to (batch_size, n_gates, hid_size)
       -- Then slize the n_gates dimension, i.e dimension 2
-      --print('reshape:: ')
-      --print(self.batchSize, 4, self.outputSize, self.H, self.W)
+      -- print('reshape:: ')
+      -- print(self.batchSize, 4, self.outputSize, self.H, self.W)
       -- print(self.batchSize, 4, self.outputSize, self.H, self.W)
       gates:add(nn.Reshape(self.batchSize, 4, self.outputSize, self.H, self.W)) 
       gates:add(nn.SplitTable(2))
@@ -187,12 +192,9 @@ function StepConvLSTM:buildModel()
       output:add(nn.CMulTable())
       
       local concat = nn.ConcatTable()
-      concat:add(output):add(nn.SelectTable(1))
+      concat:add(output) -- :add(nn.SelectTable(1))
       seq:add(concat)
-
 return seq
-
-
 
 function FastConvLSTM:nngraphModel()
   assert(nngraph, "Missing nngraph package")
@@ -211,7 +213,7 @@ function FastConvLSTM:nngraphModel()
 
   local all_input_sums = nn.CAddTable()({i2h, h2h})
 
-  local reshaped = nn.Reshape(4, self.outputSize, self.H, self.W)(all_input_sums)
+  local reshaped = nn.Reshape(4 * self.inputSize, self.outputSize, self.height, self.width)(all_input_sums)
   -- input, hidden, forget, output
   local n1, n2, n3, n4 = nn.SplitTable(2)(reshaped):split(4)
   local in_gate = nn.Sigmoid()(n1)
@@ -232,33 +234,126 @@ function FastConvLSTM:nngraphModel()
 
   return mlp
 end
+]]--
 
+--[[
+
+`forward`: updateOutput, take input, check if there is userPrevOutput, ,
+
+'backward':
+pass the parameters to previous layer: 
+
+`updateGradInput`: 
+  for LSTM 1, input is: tensor x,
+  for self.modules[1], input is {x, prevOutput, prevCell} 
+
+--]]
 
 function StepConvLSTM:updateOutput(input)
-   local prevOutput, prevCell
+  local prevOutput, prevCell
+  if verbose and self.userPrevCell then
+    print("start from preset")
+  end  
+  self.userPrevCell = self.userPrevCell or self.zeroTensor
+  self.userPrevOutput = self.userPrevOutput or self.zeroTensor
+  self.zeroTensor:resize(self.batchSize, self.outputSize, input:size(3), input:size(4)):zero()
 
-   if(not torch.isTensor(input)) then
-      print('StepConvLSTM input ', input)
-   end
+  if(not torch.isTensor(input)) then
+    print('StepConvLSTM input ', input)
+  end
+  
+  T = input:size(1)
 
-   if self.step == 1 then
-      self.prevOutput = self.userPrevOutput or self.zeroTensor
-      self.prevCell = self.userPrevCell or self.zeroTensor
-      self.zeroTensor:resize(self.batchSize, self.outputSize, input:size(3), input:size(4)):zero()
-      -- to be deleted, to reduce complexity all in batch mode
-   else
-      
-   -- output(t), cell(t) = lstm{input(t), output(t-1), cell(t-1)}
-   local cell -- cell do not output
-   self.output, cell = self.modules[1]:updateOutput{input, self.prevOutput, self.prevCell}
-   self.prevCell = cell
-   self.prevOutput = output
+  
+  
+  if self.step = 1 then
+    self.prevCell = self.userPrevCell or self.zeroTensor
+    self.prevOutput = self.userPrevOutput or self.zeroTensor 
+  else
+    self.prevCell = self.cells[self.step - 1] -- self.cells[{{self.step - 1}, {},{},{},{}}] -- T, B, H, h, w -> B, H, h, w
+    assert(self.prevCell:dim() == 4)
+    self.prevOutput = self.outputs[self.step - 1] -- self.outputs[{{self.step - 1}, {},{},{},{}}]
+      -- local cur_gates = self.pregate:forward({input, prevOutput})-- self.gates[{{self.step - 1},{},{},{},{}] -- gates is T,B,4*H,h,w
+      -- i = cur_gates[{{self.step}, }]
+      -- output(t), cell(t) = lstm{input(t), output(t-1), cell(t-1)}
+  end
 
-   self.step = self.step + 1
-   -- note that we don't return the cell, just the output
-   return self.output
+    local output, cell = self.modules[1]:updateOutput{input, self.prevOutput, self.prevCell}
+    self.cells[self.step] = cell
+    self.outputs[self.step] = output
+    self.step = self.step + 1
+
+  -- note that we don't return the cell, just the output
+  return self.output
 end
 
+-- reset from empty state
+function StepConvLSTM:reset()
+  self.cells = torch.tensor()
+  self.outputs = torch.tensor()
+  self.prevOutput = nil
+  self.prevCell = nil
+  self.output = torch.tensor()
+  self:zeroParameters()
+  self.step = 1
+end
+
+--TODO: reset from previous state -> use for online version
+
+
+function StepConvLSTM:updateGradInput_normal(input)
+  local gradInput
+
+  if self.step = 1 then
+    if self.startFromPreSet then
+      assert(self.userPrevOutput, "start from pre set, please set the prevOutput, or trun to false")
+      gradInput = self.modules[1]:updateGradInput({input, self.userPrevOutput, self.userPrevCell})[1]
+    else
+    self.prevCell = self.prevCell or self.zeroTensor
+    self.prevOutput = self.prevOutput or self.zeroTensor       
+    gradInput = self.modules[1]:updateGradInput({input, self.prevOutput, self.prevCell})
+  
+  else
+    assert(self.prevOutput, "missing self.prevOutput")    
+    gradInput = self.modules[1]:updateGradInput({input, self.prevOutput, self.prevCell})
+  end
+    -- return from modules[1].gradInpur(table) to self.gradInput(tensor)
+    self.gradInput = gradInput[1]
+
+  return self.gradInput
+
+function stepStepConvLSTM:backward(input, gradOutput, scale)
+  -- input
+  if self.step = 1 then
+    self.prevCell = self.userPrevCell or self.zeroTensor
+    self.prevOutput = self.userPrevOutput or self.zeroTensor
+    self.zeroTensor:resize(self.batchSize, self.outputSize, input:size(3), input:size(4)):zero()
+  else
+    self.prevCell = self.cells[self.step - 1]
+    self.prevOutput = self.outputs[self.step - 1]
+  end
+
+  -- gradOutput of modules
+
+  if self.step ~= self.rho then
+    self.gradOutput_cell = self.zeroTensor
+  end
+
+  scale = scale or 1
+
+  local x = input
+
+  local gradInput_x, gradInput_cell, gradInput_outputs = self.module[1]:backward({input, self.prevOutput, self.prevCell}, {gradOutput, gradOutput_cell})
+
+  self.gradOutput_cell = gradInput_cell  -- just store in the modules
+
+  self.gradInput = gradInput_x
+
+  self.step  = self.step - 1
+return self.gradInput 
+
+
+-- ===============================================================
 function StepConvLSTM:initBias(forgetBias, otherBias)
   local fBias = forgetBias or 1
   local oBias = otherBias or 0
@@ -268,6 +363,7 @@ function StepConvLSTM:initBias(forgetBias, otherBias)
   self.forgetGate.modules[2].modules[1].bias:fill(fBias)
 end
 
+function StepConvLSTM:ba
 
 
 --- KEEP FOR DEBUGGING ONLY ---
