@@ -27,7 +27,7 @@ require 'nn'
 require 'dpnn'
 require 'rnn'
 -- require 'extracunn'
-
+-- torch.setdefaulttensortype('torch.FloatTensor')
 local StepConvLSTM, parent = torch.class('nn.StepConvLSTM', 'nn.Module')
 
 function StepConvLSTM:__init(inputSize, outputSize, bufferStep, kernelSizeIn, kernelSizeMem, stride, batchSize, height, width)
@@ -65,7 +65,7 @@ function StepConvLSTM:__init(inputSize, outputSize, bufferStep, kernelSizeIn, ke
     self.width = width
     self.step = 1
     self.modules = {}
-    self.modules[1] = self:buildModel()
+    self.modules[1] = self:buildModel():float()
 
     -- local D, H, height, width = self.inputSize, self.outputSize, self.height, self.width
     -- pre-allocate all the parameters
@@ -113,7 +113,11 @@ function StepConvLSTM:clearState()
   -- TODO: ANYTHING else?
 end
 
-
+function StepConvLSTM:setFloat()
+  self.modules[1] = self.modules[1]:float()
+  print(self.modules[1])
+  assert(self.modules[1]._type == 'torch.FloatTensor')
+end
 function StepConvLSTM:weightInit(method)
   local method = method or nil
   if not method then
@@ -294,6 +298,9 @@ pass the parameters to previous layer:
 --]]
 
 function StepConvLSTM:updateOutput(input)
+  -- input = input:float()
+  print(input:type(), self.modules[1]._type)
+  assert(input:type() == self.modules[1]._type, 'input:type() != self.modules[1]._type')
   local prevOutput, prevCell
   if verbose and self.userPrevCell then
     print("start from pforget")
@@ -331,7 +338,7 @@ function StepConvLSTM:updateOutput(input)
     assert(input:size(4) == self.height)
     assert(input:size(5) == self.width) --]]
 
-    assert(input:dim() == 4)
+    assert(input:dim() == 4,'input dimenstion should be 4')
     -- print("size is ",input:size(1), self.bufferStep)
     assert(input:size(1) == self.batchSize)
     assert(input:size(2) == self.inputSize)
@@ -342,6 +349,13 @@ function StepConvLSTM:updateOutput(input)
     assert(self.prevOutput:size(2) == self.outputSize)
     assert(self.prevOutput:size(3) == self.height)
     assert(self.prevOutput:size(4) == self.width)
+    -- self.prevOutput = self.prevOutput:float()
+    print(self.prevCell:type())
+    print(input:type())
+    input = input:float()
+    -- assert(self.prevOutput:type() == input:type(), 'self.prevOutput:type() != input:type()')
+    assert(self.prevCell:type() == input:type(), self.prevCell:type())
+    assert(self.modules[1]._type == input:type(), 'self.modules[1]._type != input:type()')
     local outputAndCellTable = self.modules[1]:updateOutput({input, self.prevOutput, self.prevCell})
     local output = outputAndCellTable[1]
     local cell = outputAndCellTable[2]
