@@ -30,7 +30,7 @@ print(inputSize, outputSize,bufferStep, kernelSizeIn, kernelSizeMem, stride, bat
 lstm3 = nn.StepConvLSTM(inputSize, outputSize, bufferStep, kernelSizeIn, kernelSizeMem, stride, batchSize, height, width)
 local param3, gradParams = lstm3:getParameters()
 param3:fill(1)
-temp = param3:new():resizeAs(param3):fill(1)
+temp = torch.Tensor():resizeAs(param3):fill(1)
 print("size of parameters of lstm3", param3:size())
 -- lstm3:__tostring__()
 
@@ -41,7 +41,7 @@ local param4, gradParams = lstm4:getParameters()
 -- param4 = param3
 local param5, gradParams = lstm4.modules[1].modules[1].modules[1].modules[2]:getParameters()
 print('=========	')
-lstm2 = nn.FastConvLSTM(lstmSize_input, lstmSize_output, nStep, 3, 3, 1, batchSize):float() -- with nngraph
+lstm2 = nn.FastConvLSTM(lstmSize_input, lstmSize_output, nStep, 3, 3, 1, batchSize) -- with nngraph
 local param2, gradParams2 = lstm2.modules[1].modules[1].modules[1].modules[2]:getParameters()
 print(param2:type(),param5:type())
 param2:set(param5)
@@ -50,7 +50,7 @@ print("size of parameters of lstm2:",param2:size())
 print(lstm2.modules[1].modules[1].modules[1].modules[2])
 
 -- prepare input:
-input = torch.Tensor(nStep, batchSize, inputSize, height, width) :float() --< the right way
+input = torch.Tensor(nStep, batchSize, inputSize, height, width)--  :float() --< the right way
 gradOutput = torch.Tensor(nStep, batchSize, outputSize, height, width)
 inputTable = {}
 gradOutputTable = {}
@@ -58,8 +58,8 @@ gradOutputTable = {}
 local H = height
 local W = width
 for step=1, nStep do
-  input[step] = torch.randn(batchSize, lstmSize_input, H, W):float() --> where bug happen
-  assert(input[step]:type() == 'torch.FloatTensor', input[step]:type())
+  input[step] = torch.randn(batchSize, lstmSize_input, H, W)-- :float() --> where bug happen
+  -- assert(input[step]:type() == 'torch.FloatTensor', input[step]:type())
 
   gradOutput[step] = torch.randn(batchSize, lstmSize_output, H, W)
   inputTable[step] = torch.randn(batchSize, lstmSize_input, H, W)
@@ -68,26 +68,30 @@ for step=1, nStep do
 end
 assert(input:dim() == 5)
 -- test forward
-assert(lstm3.modules[1]._type == 'torch.FloatTensor')
+-- assert(lstm3.modules[1]._type == 'torch.FloatTensor')
 
-lstm3 = lstm3:float()
-assert(lstm3.modules[1]._type == 'torch.FloatTensor')
+-- lstm3 = lstm3:float()
+-- assert(lstm3.modules[1]._type == 'torch.FloatTensor')
 -- lstm3:setFloat()
-assert(input[1]:type() == 'torch.FloatTensor')
+-- assert(input[1]:type() == 'torch.FloatTensor')
 output3 = lstm3:forward(input[1])
-output3 = lstm3:forward(input[1])
+output3 = lstm3:forward(input[2])
 -- print(input[1])
-lstm4 = lstm4:float()
+-- lstm4 = lstm4:float()
 output4 = lstm4:forward(input[1])
 -- print(output3[1])
 -- print(lstm4.modules[1].output[1])
 -- mytester:assertTensorEq(output3, output4, 0.00000001)
 
 output2 = lstm2:forward(input[1])
-gradOutput = output3:new():resizeAs(output3):normal(10,0.1)
-lstm3:backward(input, gradOutput)
+gradOutput = torch.Tensor():new():resizeAs(output3):normal(10,0.1)
+lstm3:backward(input[1], gradOutput)
+print(gradOutput:mean())
+lstm3.modules[1]:updateParameters(1)
 param3, gradParams = lstm3.modules[1]:getParameters()
-mytester:assertTensorNe(param3, temp, 0.00000001)
+print(param3:mean(), gradParams:mean(), temp:mean())
+
+mytester:assertTensorNe(param3, temp)
 -- sprint(gradParams)
 -- print(output2:size())
 -- print(output3)
