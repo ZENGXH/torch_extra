@@ -28,9 +28,11 @@ require 'dpnn'
 require 'rnn'
 -- require 'extracunn'
 -- torch.setdefaulttensortype('torch.FloatTensor')
-local StepConvLSTM, parent = torch.class('nn.StepConvLSTM', 'nn.Module')
+local StepConvLSTM, parent = torch.class('nn.StepConvLSTM', 'nn.Container')
 
-function StepConvLSTM:__init(inputSize, outputSize, bufferStep, kernelSizeIn, kernelSizeMem, stride, batchSize, height, width)
+function StepConvLSTM:__init(inputSize, outputSize, bufferStep, kernelSizeIn, kernelSizeMem, stride, batchSize, height, width, defaultType)
+    -- print(inputSize, outputSize, bufferStep, kernelSizeIn, kernelSizeMem, stride, batchSize, height, width, defaultType)
+    assert(defaultType, 'defaultType required')
     assert(batchSize, 'input are required in batchMode')    -- to reduce the complexity
     assert(height, 'we are sad about this, but fast lstm need size of image ')
     assert(width, 'we are sad about this, but fast lstm need size of image ')
@@ -43,7 +45,7 @@ function StepConvLSTM:__init(inputSize, outputSize, bufferStep, kernelSizeIn, ke
     assert(height)
     assert(width)
     parent.__init(self)
-
+    self.defaultType = defaultType
     self.inputSize = inputSize
     self.outputSize = outputSize
     self.bufferStep = bufferStep 
@@ -61,9 +63,9 @@ function StepConvLSTM:__init(inputSize, outputSize, bufferStep, kernelSizeIn, ke
     self.height = height
     self.width = width
     self.step = 1
-    self.modules = {}
-    self.modules[1] = self:buildModel() -- :float()
-    self.module = self.modules[1]
+    -- self.modules = {}
+    self.module = self:buildModel() -- :float()
+    -- self.module = self.module
     -- local D, H, height, width = self.inputSize, self.outputSize, self.height, self.width
     -- pre-allocate all the parameters
     -- self.weight = torch.Tensor(D + H, 4 * H) 
@@ -105,9 +107,9 @@ end
 function StepConvLSTM:clearState()
   print('clear state of LSTM:')
   -- normal clear:
-  self.modules[1]:clearState()
-  assert(self.modules[1].output ~= nil)
-  assert(self.modules[1].gradInput ~= nil)
+  self.module:clearState()
+  assert(self.module.output ~= nil)
+  assert(self.module.gradInput ~= nil)
 
   -- forget previous
   self.prevOutput = self.prevOutput:new()
@@ -118,9 +120,9 @@ function StepConvLSTM:clearState()
 end
 
 function StepConvLSTM:setFloat()
-  self.modules[1] = self.modules[1]:float()
-  print(self.modules[1])
-  assert(self.modules[1]._type == 'torch.FloatTensor')
+  self.module = self.module:float()
+  print(self.module)
+  assert(self.module._type == 'torch.FloatTensor')
 end
 function StepConvLSTM:weightInit(method)
   local method = method or nil
@@ -297,20 +299,21 @@ pass the parameters to previous layer:
 
 `updateGradInput`: 
   for LSTM 1, input is: tensor x,
-  for self.modules[1], input is {x, prevOutput, prevCell} 
+  for self.module, input is {x, prevOutput, prevCell} 
 
 --]]
-function StepConvLSTM:recursiveTypeChecking(model, defaulType)
-  print('**** checking', model)
-  if(torch.isTypeOf(model, 'nn.Container')) or model.modules then
-    for i = 1, #model.modules do
-      print('******1 checking', model)
-      self.recursiveTypeChecking(model.modules[i])
-
+function StepConvLSTM:typeChecking(para, msg)
+  if torch.type(para) == 'table' then
+    self.typeChecking(para[1], msg)
+  elseif(torch.isTensor(para)) then
+    msg = 'fail TypeChecking on'..msg
+    assert(para:type() == self.defaulType, msg)
+  elseif(torch.isTypeOf(para, 'nn.Container')) or para.modules then
+    for i = 1, #para.modules do
+      self.typeChecking(para.modules[i])
     end
-  elseif(torch.isTypeOf(model, 'nn.Module')) then
-    print('******2 checking', model)
-    assert(model._type == defaulType)
+  elseif(torch.isTypeOf(para, 'nn.Module')) then
+    assert(para._type == defaulType)
   end
 end
 
@@ -323,15 +326,11 @@ function StepConvLSTM:updateOutput(input)
     self.step = 1
     print('ConvLSTM reset step to 1')
   end
-  input = input:float()
-  assert(self.outputs:type() == input:type(), 'fail self.outputs:type() == input:type()')
 
-  print(input:type(), self.modules[1]._type)
-  assert(input:type() == self.modules[1]._type, 'input:type() != self.modules[1]._type')
-  
-  if verbose and self.userPrevCell then
-    print("start from pforget")
-  end  
+  input = input:type(self.defaultType)
+  assert(self.outputs:type() == input:type(), 'fail self.outputs:type() == input:type()')
+  assert(input:type() == self.module._type, 'input:type() != self.module._type')
+
 
   -- self.userPrevCell = self.userPrevCell or self.zeroTensor
   -- self.userPrevOutput = self.userPrevOutput or self.zeroTensor
@@ -339,17 +338,13 @@ function StepConvLSTM:updateOutput(input)
   if(not torch.isTensor(input)) then
     print('StepConvLSTM input ', input)
   end
-  
-  T = input:size(1)
-  print('p1')
+   
   if self.step == 1 then
     assert(self.zeroTensor:size(1) == self.batchSize)
     self.prevCell = self.zeroTensor
     self.prevOutput = self.zeroTensor 
   else
-    print(self.outputs:type())
     assert(self.outputs:type() == input:type(), 'fail, self.outputs:type() == input:type()')
-
     self.prevCell = self.cells[self.step - 1] -- self.cells[{{self.step - 1}, {},{},{},{}}] -- T, B, H, h, w -> B, H, h, w
     assert(self.prevCell:dim() == 4)
     self.prevOutput = self.outputs[self.step - 1] -- self.outputs[{{self.step - 1}, {},{},{},{}}]
@@ -358,16 +353,17 @@ function StepConvLSTM:updateOutput(input)
       -- output(t), cell(t) = lstm{input(t), output(t-1), cell(t-1)}
     assert(self.outputs:type() == input:type(), 'fail after, self.outputs:type() == input:type()')
   end
-  --[[
+    --[[
     assert(input:dim() == 5)
     print("size is ",input:size(1), self.bufferStep)
     assert(input:size(1) == self.bufferStep)
     assert(input:size(2) == self.batchSize)
     assert(input:size(3) == self.inputSize)
     assert(input:size(4) == self.height)
-    assert(input:size(5) == self.width) --]]
-  print('p2')
-
+    assert(input:size(5) == self.width) 
+    --]]
+    
+    -- print('p2')
     assert(input:dim() == 4,'input dimenstion should be 4')
     -- print("size is ",input:size(1), self.bufferStep)
     assert(input:size(1) == self.batchSize)
@@ -375,48 +371,34 @@ function StepConvLSTM:updateOutput(input)
     assert(input:size(3) == self.height)
     assert(input:size(4) == self.width)
     -- assert(self.prevOutput)
-    print('p3')
+    -- print('p3')
     -- print('self.prevOutput is', self.prevOutput)
-    print(self.prevOutput:size())
+    -- print(self.prevOutput:size())
     assert(self.prevOutput:size(1) == self.batchSize,'fail self.prevOutput:size(1) == self.batchSize' )
     assert(self.prevOutput:size(2) == self.outputSize)
     assert(self.prevOutput:size(3) == self.height)
     assert(self.prevOutput:size(4) == self.width)
-    -- self.prevOutput = self.prevOutput:float()
-    -- print(self.prevCell:type())
-    -- print(input:type())
-    print('ConvLSTM: step:', self.step)
-    -- input = input:float()
-
-    -- assert(self.prevOutput:type() == input:type(), 'self.prevOutput:type() != input:type()')
-    assert(self.modules[1]._type == self.zeroTensor:type(), 'fail: self.modules[1]._type == self.zeroTensor:type()')
+    assert(self.module._type == self.zeroTensor:type(), 'fail: self.module._type == self.zeroTensor:type()')
     assert(self.prevOutput:type() == input:type(), self.prevOutput:type())
     assert(self.prevCell:type() == input:type(), self.prevCell:type())
-    assert(self.modules[1]._type == input:type(), 'self.modules[1]._type != input:type()')
-print('p4.1', self.modules[1].modules[1].output)
+    assert(self.module._type == input:type(), 'self.module._type != input:type()')
+    -- print('p4.1', self.module.modules[1].output)
+    -- assert(defaulType, 'need to specify defaulType globally')
+    self.module:type(self.defaultType)
 
-self.modules[1]:float()
+    -- print('p4', self.module.modules[2]._type)
+    assert(torch.isTypeOf(self.module, 'nn.Module'))
+    assert(torch.isTypeOf(self.module, 'nn.Container'))
 
-print('p4', self.modules[1].modules[2]._type)
-assert(torch.isTypeOf(self.modules[1], 'nn.Module'))
-assert(torch.isTypeOf(self.modules[1], 'nn.Container'))
-
-    self.recursiveTypeChecking(self.modules[1], 'torch.FloatTensor')
-    local outputAndCellTable = self.modules[1]:updateOutput({input, self.prevOutput, self.prevCell})
+    -- self.recursiveTypeChecking(self.module, 'torch.FloatTensor')
+    local outputAndCellTable = self.module:updateOutput({input, self.prevOutput, self.prevCell})
     local output = outputAndCellTable[1]
     local cell = outputAndCellTable[2]
 
     assert(self.outputs:type() == input:type(), 'fail self.outputs:type() == input:type()')
     assert(output:type() == input:type(), 'fail output:type() == input:type()')
     assert(cell:type() == input:type(), 'fail output:type() == input:type()')
-
-    -- print(output)
-    -- print('output size:', output:size())
     assert(cell)
-    -- print(self.cells[self.step]:size())
-    -- print(cell:size())
-    -- assert(self.cells[self.step]:size() == cell:size())
-    print(self.bufferStep)
     self.cells[self.step] = cell
     self.outputs[self.step] = output
 
@@ -435,19 +417,21 @@ function StepConvLSTM:forget()
   -- defaulType = self.zeroTensor:float() -- :type(defaulType)
   -- print(defaulType)
   assert(torch.isTensor(self.zeroTensor), 'self.zeroTensor is not a tensor')
-
-  self.prevCell = self.zeroTensor:float() -- :type(defaulType)
-  self.prevOutput = self.zeroTensor:float() -- :type(defaulType)
-  self.gradPrevCell = self.zeroTensor:float() -- :type(defaulType)
-  self.gradPrevOutput = self.zeroTensor:float() -- :type(defaulType)
-  assert(torch.isTensor(self.prevCell), 'self.prevCell is not a tensor')
+  -- print(self.defaultType)
+  self.prevCell = self.zeroTensor:type(self.defaultType)
+  self.prevOutput = self.zeroTensor:type(self.defaultType)
+  self.gradPrevCell = self.zeroTensor:type(self.defaultType)
+  self.gradPrevOutput = self.zeroTensor:type(self.defaultType)
+  -- print(self.prevCell)
+  -- print(self.zeroTensor)
+  assert(torch.isTensor(self.prevCell), 'self.prevCell is not a tensor: ')
   -- self.cells = torch.Tensor(self.bufferStep, self.batchSize, self.outputSize, self.height, self.width)
   -- self.outputs = torch.Tensor(self.bufferStep, self.batchSize,self.outputSize, self.height, self.width)
   -- self.prevOutput = self.zeroTensor
   -- self.prevCell = self.zeroTensor
   -- self.output = torch.Tensor(self.outputSize, self.batchSize,self.height, self.width)
-  -- self.modules[1]:zeroGradParameters()
-  self.modules[1]:forget()
+  -- self.module:zeroGradParameters()
+  -- self.module:forget()
   self.step = 1
 end
 
@@ -456,7 +440,6 @@ end
 
 function StepConvLSTM:backward(input, gradOutput, scale)
   -- input
-  print('StepConvLSTMbackward')
   if self.step == 1 then
     self.prevCell = self.zeroTensor
     self.prevOutput = self.zeroTensor
@@ -479,7 +462,8 @@ function StepConvLSTM:backward(input, gradOutput, scale)
   -- print(self.gradPrevCell)
   -- assert(self.gradPrevCell)
 
-  local gradTable = self.modules[1]:backward({input, self.prevOutput, self.prevCell}, {gradOutput, self.gradPrevCell})
+
+  local gradTable = self.module:backward({input, self.prevOutput, self.prevCell}, {gradOutput, self.gradPrevCell})
   
   self.gradInput = gradTable[1]
   self.gradPrevOutput = gradTable[1]
@@ -487,10 +471,9 @@ function StepConvLSTM:backward(input, gradOutput, scale)
 
   --  print(gradInput_x)
   -- gradInput_x, gradInput_cell, gradInput_outputs = , 
-  self.modules[1]:accGradParameters({input, self.prevOutput, self.prevCell}, {gradOutput, self.gradPrevCell})
-  self.modules[1]:updateParameters(1)
-  
 
+  self.module:accGradParameters({input, self.prevOutput, self.prevCell}, {gradOutput, self.gradPrevCell})
+  -- self.module:updateParameters()
   
   self.step  = self.step - 1
   return self.gradInput 
@@ -612,8 +595,6 @@ function StepConvLSTM:buildModel_simVerson()
 end
 
 
-
-
 --- KEEP FOR DEBUGGING ---
 
 --[[
@@ -622,5 +603,5 @@ function StepConvLSTM:__tostring__()
   print('inputSize, outputSize, bufferStep, kernelSizeIn, kernelSizeMem, stride, batchSize, height, width')
   print(self.inputSize, self.outputSize, self.bufferStep, self.kernelSizeIn, self.kernelSizeMem, self.stride, self.batchSize, self.height, self.width)
   print("print modules[1] of the StepConvLSTM:")
-  print(self.modules[1])
+  print(self.module)
 end]]--
