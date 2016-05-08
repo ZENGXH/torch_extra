@@ -26,6 +26,7 @@ local _ = require 'moses'
 require 'nn'
 require 'dpnn'
 require 'rnn'
+require 'optim'
 -- require 'extracunn'
 -- torch.setdefaulttensortype('torch.FloatTensor')
 local StepConvLSTM, parent = torch.class('nn.StepConvLSTM', 'nn.Container')
@@ -162,12 +163,6 @@ function StepConvLSTM:buildModel()
       gates:add(para)
       gates:add(nn.CAddTable())
 
-      -- Reshape to (batch_size, n_gates, hid_size)
-      -- Then slize the n_gates dimension, i.e dimension 2
-      -- print('reshape:: ')
-      -- print(self.batchSize, 4, self.outputSize, self.H, self.W)
-      -- print(self.batchSize, 4, self.outputSize, self.H, self.W)
-      -- assert(self.height ==10)
       gates:add(nn.Reshape(self.batchSize, 4, self.outputSize, self.height, self.width)) 
       gates:add(nn.SplitTable(2))
       transfer = nn.ParallelTable()
@@ -212,36 +207,9 @@ function StepConvLSTM:buildModel()
       cellAct:add(concat_output):add(nn.CMulTable())
       local concat = nn.ConcatTable()
       concat:add(cellAct):add(nn.SelectTable(1))
-      -- concat:add(nn.CMulTable())
-      -- local output = nn.Sequential()
-      -- output:add(concat):add(nn.SelectTable(1))
 
-      -- output:add(nn.NarrowTable(1,2)):add(SelectTable(3))
-
-      -- output:add(nn.CMulTable())
-      
-      -- local concat = nn.ConcatTable()
-      -- concat:add(output) -- :add(nn.SelectTable(1))
       seq:add(concat) -- :add()      
-      --[[
-      local cellAct = nn.Sequential()
 
-      cellAct:add(nn.SelectTable(1))
-      cellAct:add(nn.Tanh())
-      local concat = nn.ConcatTable()
-      concat:add(cellAct):add(nn.SelectTable(2))
-      concat:add(nn.CMulTable())
-      local output = nn.Sequential()
-      output:add(concat):add(nn.SelectTable(1))
-
-      -- output:add(nn.NarrowTable(1,2)):add(SelectTable(3))
-
-      -- output:add(nn.CMulTable())
-      
-      local concat = nn.ConcatTable()
-      concat:add(output) -- :add(nn.SelectTable(1))
-      seq:add(concat) -- :add()
-    ]]--
       return seq
 end
 
@@ -317,95 +285,101 @@ end
 
 
 
-function StepConvLSTM:updateOutput(input)
+function StepConvLSTM:updateOutput(inputBatch)
 
   if(self.step > self.bufferStep) then
     self.step = 1
     print('ConvLSTM reset step to 1')
   end
+  print('inputBatch size: ' , inputBatch:size())
+  assert(inputBatch:dim() == 5, 'input dimension, 5 required get'..inputBatch:dim())
+  print("size is ",inputBatch:size(1), self.bufferStep)
+  assert(inputBatch:size(1) == self.bufferStep)
+  assert(inputBatch:size(2) == self.batchSize)
+  assert(inputBatch:size(3) == self.inputSize)
+  assert(inputBatch:size(4) == self.height)
+  assert(inputBatch:size(5) == self.width) 
 
-  input = input:type(self.defaultType)
-  assert(self.outputs:type() == input:type(), 'fail self.outputs:type() == input:type()')
-  print(self.module)
-  assert(input:type() == self.module._type, 'input:type() != self.module._type 1:'..input:type()..' and 2: '..self.module._type)
-
-
-  -- self.userPrevCell = self.userPrevCell or self.zeroTensor
-  -- self.userPrevOutput = self.userPrevOutput or self.zeroTensor
-
-  if(not torch.isTensor(input)) then
-    print('StepConvLSTM input ', input)
-  end
-   
-  if self.step == 1 then
-    assert(self.zeroTensor:size(1) == self.batchSize)
-    self.prevCell = self.zeroTensor
-    self.prevOutput = self.zeroTensor 
-  else
-    assert(self.outputs:type() == input:type(), 'fail, self.outputs:type() == input:type()')
-    self.prevCell = self.cells[self.step - 1] -- self.cells[{{self.step - 1}, {},{},{},{}}] -- T, B, H, h, w -> B, H, h, w
-    assert(self.prevCell:dim() == 4)
-    self.prevOutput = self.outputs[self.step - 1] -- self.outputs[{{self.step - 1}, {},{},{},{}}]
-      -- local cur_gates = self.pregate:forward({input, prevOutput})-- self.gates[{{self.step - 1},{},{},{},{}] -- gates is T,B,4*H,h,w
-      -- i = cur_gates[{{self.step}, }]
-      -- output(t), cell(t) = lstm{input(t), output(t-1), cell(t-1)}
-    assert(self.outputs:type() == input:type(), 'fail after, self.outputs:type() == input:type()')
-  end
-    --[[
-    assert(input:dim() == 5)
-    print("size is ",input:size(1), self.bufferStep)
-    assert(input:size(1) == self.bufferStep)
-    assert(input:size(2) == self.batchSize)
-    assert(input:size(3) == self.inputSize)
-    assert(input:size(4) == self.height)
-    assert(input:size(5) == self.width) 
-    --]]
-    
-    -- print('p2')
-    assert(input:dim() == 4,'input dimenstion should be 4')
-    -- print("size is ",input:size(1), self.bufferStep)
-    assert(input:size(1) == self.batchSize)
-    assert(input:size(2) == self.inputSize)
-    assert(input:size(3) == self.height)
-    assert(input:size(4) == self.width)
-    -- assert(self.prevOutput)
-    -- print('p3')
-    -- print('self.prevOutput is', self.prevOutput)
-    -- print(self.prevOutput:size())
-    assert(self.prevOutput:size(1) == self.batchSize,'fail self.prevOutput:size(1) == self.batchSize' )
-    assert(self.prevOutput:size(2) == self.outputSize)
-    assert(self.prevOutput:size(3) == self.height)
-    assert(self.prevOutput:size(4) == self.width)
-    assert(self.module._type == self.zeroTensor:type(), 'fail: self.module._type == self.zeroTensor:type()')
-    assert(self.prevOutput:type() == input:type(), self.prevOutput:type())
-    assert(self.prevCell:type() == input:type(), self.prevCell:type())
-    assert(self.module._type == input:type(), 'self.module._type != input:type()')
-    -- print('p4.1', self.module.modules[1].output)
-    -- assert(defaulType, 'need to specify defaulType globally')
-    self.module:type(self.defaultType)
-
-    -- print('p4', self.module.modules[2]._type)
-    assert(torch.isTypeOf(self.module, 'nn.Module'))
-    assert(torch.isTypeOf(self.module, 'nn.Container'))
-
-    -- self.recursiveTypeChecking(self.module, 'torch.FloatTensor')
-    local outputAndCellTable = self.module:updateOutput({input, self.prevOutput, self.prevCell})
-    local output = outputAndCellTable[1]
-    local cell = outputAndCellTable[2]
-
+  for t = 1, self.bufferStep do
+    print('StepConvLSTM sequencing step: '..t)
+    input = inputBatch[t]
+    input = input:type(self.defaultType)
     assert(self.outputs:type() == input:type(), 'fail self.outputs:type() == input:type()')
-    assert(output:type() == input:type(), 'fail output:type() == input:type()')
-    assert(cell:type() == input:type(), 'fail output:type() == input:type()')
-    assert(cell)
-    self.cells[self.step] = cell
-    self.outputs[self.step] = output
+    -- print(self.module)
+    assert(input:type() == self.module._type, 'input:type() != self.module._type 1:'..input:type()..' and 2: '..self.module._type)
 
-    assert(self.outputs:type() == input:type(), self.outputs:type())
-    self.output = output
-    self.step = self.step + 1
+    -- self.userPrevCell = self.userPrevCell or self.zeroTensor
+    -- self.userPrevOutput = self.userPrevOutput or self.zeroTensor
+
+    if(not torch.isTensor(input)) then
+      print('StepConvLSTM input ', input)
+    end
+     
+    if self.step == 1 then
+      assert(self.zeroTensor:size(1) == self.batchSize)
+      self.prevCell = self.zeroTensor
+      self.prevOutput = self.zeroTensor 
+    else
+      assert(self.outputs:type() == input:type(), 'fail, self.outputs:type() == input:type()')
+      self.prevCell = self.cells[self.step - 1] -- self.cells[{{self.step - 1}, {},{},{},{}}] -- T, B, H, h, w -> B, H, h, w
+      assert(self.prevCell:dim() == 4)
+      self.prevOutput = self.outputs[self.step - 1] -- self.outputs[{{self.step - 1}, {},{},{},{}}]
+        -- local cur_gates = self.pregate:forward({input, prevOutput})-- self.gates[{{self.step - 1},{},{},{},{}] -- gates is T,B,4*H,h,w
+        -- i = cur_gates[{{self.step}, }]
+        -- output(t), cell(t) = lstm{input(t), output(t-1), cell(t-1)}
+      assert(self.outputs:type() == input:type(), 'fail after, self.outputs:type() == input:type()')
+    end
+      
+
+      -- print('p2')
+      --[[
+      assert(input:dim() == 4,'input dimenstion should be 4')
+      -- print("size is ",input:size(1), self.bufferStep)
+      assert(input:size(1) == self.batchSize)
+      assert(input:size(2) == self.inputSize)
+      assert(input:size(3) == self.height)
+      assert(input:size(4) == self.width)
+
+      ]]--
+      -- assert(self.prevOutput)
+      -- print('p3')
+      -- print('self.prevOutput is', self.prevOutput)
+      -- print(self.prevOutput:size())
+      assert(self.prevOutput:size(1) == self.batchSize,'fail self.prevOutput:size(1) == self.batchSize' )
+      assert(self.prevOutput:size(2) == self.outputSize)
+      assert(self.prevOutput:size(3) == self.height)
+      assert(self.prevOutput:size(4) == self.width)
+      assert(self.module._type == self.zeroTensor:type(), 'fail: self.module._type == self.zeroTensor:type()')
+      assert(self.prevOutput:type() == input:type(), self.prevOutput:type())
+      assert(self.prevCell:type() == input:type(), self.prevCell:type())
+      assert(self.module._type == input:type(), 'self.module._type != input:type()')
+      -- print('p4.1', self.module.modules[1].output)
+      -- assert(defaulType, 'need to specify defaulType globally')
+      self.module:type(self.defaultType)
+
+      -- print('p4', self.module.modules[2]._type)
+      assert(torch.isTypeOf(self.module, 'nn.Module'))
+      assert(torch.isTypeOf(self.module, 'nn.Container'))
+
+      -- self.recursiveTypeChecking(self.module, 'torch.FloatTensor')
+      local outputAndCellTable = self.module:updateOutput({input, self.prevOutput, self.prevCell})
+      local output = outputAndCellTable[1]
+      local cell = outputAndCellTable[2]
+
+      assert(self.outputs:type() == input:type(), 'fail self.outputs:type() == input:type()')
+      assert(output:type() == input:type(), 'fail output:type() == input:type()')
+      assert(cell:type() == input:type(), 'fail output:type() == input:type()')
+      assert(cell)
+      self.cells[self.step] = cell
+      self.outputs[self.step] = output
+
+      assert(self.outputs:type() == input:type(), self.outputs:type())
+      self.output = output
+      self.step = self.step + 1
+  end
 
   -- note that we don't return the cell, just the output
-  return self.output
+  return self.outputs
 end
 
 -- forget from empty state
@@ -486,114 +460,6 @@ function StepConvLSTM:initBias(forgetBias, otherBias)
   self.cellGate.modules[2].modules[1].bias:fill(oBias)
   self.forgetGate.modules[2].modules[1].bias:fill(fBias)
 end
-
-
-
---- KEEP FOR DEBUGGING ONLY ---
-
-function StepConvLSTM:buildGate()
-   -- Note : Input is : {input(t), output(t-1), cell(t-1)}
-   local gate = nn.Sequential()
-   gate:add(nn.NarrowTable(1,2)) -- we don't need cell here
-   local input2gate = nn.SpatialConvolution(self.inputSize, self.outputSize, self.kernelSizeIn, self.kernelSizeIn, self.stride, self.stride, self.padIn, self.padIn)
-   local output2gate = nn.SpatialConvolution(self.outputSize, self.outputSize, self.kernelSizeMem, self.kernelSizeMem, self.stride, self.stride, self.padMem, self.padMem)
-   local para = nn.ParallelTable()
-   para:add(input2gate):add(output2gate) 
-   gate:add(para)
-   gate:add(nn.CAddTable())
-   gate:add(nn.Sigmoid())
-   return gate
-end
-
-function StepConvLSTM:buildInputGate()
-   self.inputGate = self:buildGate()
-   return self.inputGate
-end
-
-function StepConvLSTM:buildForgetGate()
-   self.forgetGate = self:buildGate()
-   return self.forgetGate
-end
-
-function StepConvLSTM:buildcellGate()
-   -- Input is : {input(t), output(t-1), cell(t-1)}, but we only need {input(t), output(t-1)}
-   local hidden = nn.Sequential()
-   hidden:add(nn.NarrowTable(1,2))
-   local input2gate = nn.SpatialConvolution(self.inputSize, self.outputSize, self.kernelSizeIn, self.kernelSizeIn, self.stride, self.stride, self.padIn, self.padIn)
-   local output2gate = nn.SpatialConvolution(self.outputSize, self.outputSize, self.kernelSizeMem, self.kernelSizeMem, self.stride, self.stride, self.padMem, self.padMem)
-   local para = nn.ParallelTable()
-   para:add(input2gate):add(output2gate)
-   hidden:add(para)
-   hidden:add(nn.CAddTable())
-   hidden:add(nn.Tanh())
-   self.cellGate = hidden
-   return hidden
-end
-
-function StepConvLSTM:buildcell()
-   -- Input is : {input(t), output(t-1), cell(t-1)}
-   self.inputGate = self:buildInputGate() 
-   self.forgetGate = self:buildForgetGate()
-   self.cellGate = self:buildcellGate()
-   -- forget = forgetGate{input, output(t-1), cell(t-1)} * cell(t-1)
-   local forget = nn.Sequential()
-   local concat = nn.ConcatTable()
-   concat:add(self.forgetGate):add(nn.SelectTable(3))
-   forget:add(concat)
-   forget:add(nn.CMulTable())
-   -- input = inputGate{input(t), output(t-1), cell(t-1)} * cellGate{input(t), output(t-1), cell(t-1)}
-   local input = nn.Sequential()
-   local concat2 = nn.ConcatTable()
-   concat2:add(self.inputGate):add(self.cellGate)
-   input:add(concat2)
-   input:add(nn.CMulTable())
-   -- cell(t) = forget + input
-   local cell = nn.Sequential()
-   local concat3 = nn.ConcatTable()
-   concat3:add(forget):add(input)
-   cell:add(concat3)
-   cell:add(nn.CAddTable())
-   self.cell = cell
-   return cell
-end   
-   
-function StepConvLSTM:buildOutputGate()
-   self.outputGate = self:buildGate()
-   return self.outputGate
-end
-
--- cell(t) = cell{input, output(t-1), cell(t-1)}
--- output(t) = outputGate{input, output(t-1)}*tanh(cell(t))
--- output of Model is table : {output(t), cell(t)} 
-function StepConvLSTM:buildModel_simVerson()
-   -- Input is : {input(t), output(t-1), cell(t-1)}
-   self.cell = self:buildcell()
-   self.outputGate = self:buildOutputGate()
-   -- assemble
-   local concat = nn.ConcatTable()
-   concat:add(nn.NarrowTable(1,2)):add(self.cell)
-   local model = nn.Sequential()
-   model:add(concat)
-   -- output of concat is {{input(t), output(t-1)}, cell(t)}, 
-   -- so flatten to {input(t), output(t-1), cell(t)}
-   model:add(nn.FlattenTable())
-   local cellAct = nn.Sequential()
-   cellAct:add(nn.SelectTable(3))
-   cellAct:add(nn.Tanh())
-   local concat3 = nn.ConcatTable()
-   concat3:add(self.outputGate):add(cellAct)
-   local output = nn.Sequential()
-   output:add(concat3)
-   output:add(nn.CMulTable())
-   -- we want the model to output : {output(t), cell(t)}
-   local concat4 = nn.ConcatTable()
-   concat4:add(output):add(nn.SelectTable(3))
-   model:add(concat4)
-   return model
-end
-
-
---- KEEP FOR DEBUGGING ---
 
 --[[
 function StepConvLSTM:__tostring__()
