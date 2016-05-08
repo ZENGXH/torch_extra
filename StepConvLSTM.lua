@@ -64,7 +64,7 @@ function StepConvLSTM:__init(inputSize, outputSize, bufferStep, kernelSizeIn, ke
     self.width = width
     self.step = 1
     -- self.modules = {}
-    self.module = self:buildModel() -- :float()
+    self.module = self:buildModel()-- :float()
     -- self.module = self.module
     -- local D, H, height, width = self.inputSize, self.outputSize, self.height, self.width
     -- pre-allocate all the parameters
@@ -135,31 +135,27 @@ function StepConvLSTM:weightInit(method)
   print('not implement: weightInit')
 end
 
-function StepConvLSTM:prepareGate()
-  self.i2g = nn.SpatialConvolution(self.inputSize, self.outputSize*4, 
-                                  self.kernelSizeIn, self.kernelSizeIn, 
-                                  self.stride, self.stride, 
-                                  self.padIn, self.padIn)
-  self.o2g = nn.SpatialConvolution(self.outputSize, self.outputSize*4, 
-                                  self.kernelSizeMem, self.kernelSizeMem, 
-                                  self.stride, self.stride, 
-                                  self.padMem, self.padMem)  
-  -- self.preGate = nn.ParallelTable():add(self.i2g):add(self.o2g)
-  -- TODO: USE NO BIAS CONV
-end
+
 -- put them in self for convinence of debugging
 
 
 
 function StepConvLSTM:buildModel()
-   self:prepareGate()
+    i2g = nn.SpatialConvolution(self.inputSize, self.outputSize*4, 
+                                  self.kernelSizeIn, self.kernelSizeIn, 
+                                  self.stride, self.stride, 
+                                  self.padIn, self.padIn)
+    o2g = nn.SpatialConvolution(self.outputSize, self.outputSize*4, 
+                                  self.kernelSizeMem, self.kernelSizeMem, 
+                                  self.stride, self.stride, 
+                                  self.padMem, self.padMem) 
    if self.usenngraph then
       print('usting nngraph')
-      return self:nngraphModel()
+      return self:nngraphModel(i2g, o2g)
    end
 
       print('not using nngraph')
-      local para = nn.ParallelTable():add(self.i2g):add(self.o2g)
+      local para = nn.ParallelTable():add(i2g):add(o2g)
 
       gates = nn.Sequential()
       gates:add(nn.NarrowTable(1,2))
@@ -249,7 +245,8 @@ function StepConvLSTM:buildModel()
       return seq
 end
 
-function StepConvLSTM:nngraphModel()
+function StepConvLSTM:nngraphModel(i2g, o2g)
+  require 'nngraph'
   assert(nngraph, "Missing nngraph package")
 
   local inputs = {}
@@ -261,8 +258,8 @@ function StepConvLSTM:nngraphModel()
 
   -- evaluate the input sums at once for efficiency
 
-  local i2h = self.i2g(x):annotate{name='i2h'}
-  local h2h = self.o2g(prev_h):annotate{name='h2h'}
+  local i2h = i2g(x):annotate{name='i2h'}
+  local h2h = o2g(prev_h):annotate{name='h2h'}
 
   local all_input_sums = nn.CAddTable()({i2h, h2h})
   local reshaped = nn.Reshape(4, self.batchSize, self.outputSize, self.height, self.width)(all_input_sums)
@@ -329,7 +326,8 @@ function StepConvLSTM:updateOutput(input)
 
   input = input:type(self.defaultType)
   assert(self.outputs:type() == input:type(), 'fail self.outputs:type() == input:type()')
-  assert(input:type() == self.module._type, 'input:type() != self.module._type')
+  print(self.module)
+  assert(input:type() == self.module._type, 'input:type() != self.module._type 1:'..input:type()..' and 2: '..self.module._type)
 
 
   -- self.userPrevCell = self.userPrevCell or self.zeroTensor
