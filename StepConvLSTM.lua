@@ -7,9 +7,33 @@
   kernelSizeMem  - convolutional filter size to convolve cell; usually kernelSizeMem > kernelSizeIn  
 --]]
 
+
+--[[
+  carefully handle the size of different variable:
+  inputBatch: [bufferSize, batchSize, inputSize, height, width]
+  
+  for i = 1, bufferSize do
+    self.module: 
+    input = inputBatch[i] with size: [batchSize, inputSize, height, width]
+    output: [batchSize, outputSize, height, width]
+  end
+
+  outputBatch: [bufferSize, batchSize, outputSize, height, width]
+
+  gradInput = [bufferSize, batchSize, inputBatch, height, width]
+  gradOutput = [bufferSize, batchSize, inputBatch, height, width]
+
+  if bufferSize = 1, inputBatch can be [batchSize, inputSize, height, width]
+  and the same for outputBatch, 
+
+  but then we need to view and unview the input and output to make it consistent
+  
+--]]
+
 --[[
    StepConvLSTM need to work with nn.Sequencer(nn.stepStepConvLSTM)
    it will only remember one cell state before, 
+
    # TODO: if need more previous cell, output it and save
    it will only remember one gradInput as Tensor type instead of table
    all outputs will be saved in nn.Sequencer
@@ -96,6 +120,8 @@ function StepConvLSTM:__init(inputSize, outputSize, bufferStep, kernelSizeIn, ke
     self.output = torch.Tensor(outputSize, batchSize, height, width)
     self.zeroTensor = torch.Tensor(self.batchSize, self.outputSize, self.height, self.width):zero()
     self.outputs = torch.Tensor(bufferStep, batchSize, outputSize, height, width):fill(0)
+    self.gradInput = torch.Tensor(bufferStep, batchSize, inputSize, height, width):fill(0)
+
     self.cells = torch.Tensor(bufferStep, batchSize, outputSize, height, width):fill(0)
     print('configure StepConvLSTM:')
     print('inputSize, outputSize, bufferStep, kernelSizeIn, kernelSizeMem, stride, batchSize, height, width')
@@ -286,22 +312,29 @@ end
 
 
 function StepConvLSTM:updateOutput(inputBatch)
+  assert(torch.isTensor(inputBatch))
+  local viewFlag = 0
+  if(self.bufferStep == 1 and inputBatch:dim() == 4) then
+    self:viewInput(inputBatch)
+    viewFlag = 1
+  end
 
   if(self.step > self.bufferStep) then
     self.step = 1
     print('ConvLSTM reset step to 1')
   end
-  print('inputBatch size: ' , inputBatch:size())
+
+  -- print('inputBatch size: ' , inputBatch:size())
   assert(inputBatch:dim() == 5, 'input dimension, 5 required get'..inputBatch:dim())
-  print("size is ",inputBatch:size(1), self.bufferStep)
+  -- print("size is ",inputBatch:size(1), self.bufferStep)
   assert(inputBatch:size(1) == self.bufferStep)
-  assert(inputBatch:size(2) == self.batchSize)
+  assert(inputBatch:size(2) == self.batchSize, 'inputBatch dim2 = batchSize require')
   assert(inputBatch:size(3) == self.inputSize)
   assert(inputBatch:size(4) == self.height)
   assert(inputBatch:size(5) == self.width) 
 
   for t = 1, self.bufferStep do
-    print('StepConvLSTM sequencing step: '..t)
+    print('StepConvLSTM sequencing step: ', t)
     input = inputBatch[t]
     input = input:type(self.defaultType)
     assert(self.outputs:type() == input:type(), 'fail self.outputs:type() == input:type()')
@@ -312,7 +345,7 @@ function StepConvLSTM:updateOutput(inputBatch)
     -- self.userPrevOutput = self.userPrevOutput or self.zeroTensor
 
     if(not torch.isTensor(input)) then
-      print('StepConvLSTM input ', input)
+      -- print('StepConvLSTM input ', input)
     end
      
     if self.step == 1 then
@@ -331,7 +364,6 @@ function StepConvLSTM:updateOutput(inputBatch)
     end
       
 
-      -- print('p2')
       --[[
       assert(input:dim() == 4,'input dimenstion should be 4')
       -- print("size is ",input:size(1), self.bufferStep)
@@ -341,10 +373,7 @@ function StepConvLSTM:updateOutput(inputBatch)
       assert(input:size(4) == self.width)
 
       ]]--
-      -- assert(self.prevOutput)
-      -- print('p3')
-      -- print('self.prevOutput is', self.prevOutput)
-      -- print(self.prevOutput:size())
+
       assert(self.prevOutput:size(1) == self.batchSize,'fail self.prevOutput:size(1) == self.batchSize' )
       assert(self.prevOutput:size(2) == self.outputSize)
       assert(self.prevOutput:size(3) == self.height)
@@ -372,10 +401,23 @@ function StepConvLSTM:updateOutput(inputBatch)
       assert(cell)
       self.cells[self.step] = cell
       self.outputs[self.step] = output
-
+      assert(output, 'output is none for StepConvLSTM')
+      assert(self.outputs, 'self.outputs is none for StepConvLSTM')
       assert(self.outputs:type() == input:type(), self.outputs:type())
       self.output = output
       self.step = self.step + 1
+  end
+  print('end StepConvLSTM')
+  
+  if self.bufferStep == 1 and viewFlag then
+    self:unviewInput(inputBatch)
+    assert(self.outputs, 'output is none for StepConvLSTM')
+    -- print(self.outputs)
+    local dim = self.outputs:dim()
+    local outputs = self.outputs:clone()
+    self:unviewInput(outputs)
+    assert(dim == self.outputs:dim())
+    return outputs
   end
 
   -- note that we don't return the cell, just the output
@@ -410,8 +452,60 @@ end
 --TODO: forget from previous state -> use for online version
 
 
+function StepConvLSTM:viewInput(x)
+  assert(x, 'input for viewInput empty')
+  local dims = x:size()
+  x = x:resize(1, dims[1], dims[2], dims[3], dims[4])
+  return x
+end
+
+function StepConvLSTM:unviewInput(x)
+  local dims = x:size()
+  x = x:resize(dims[2], dims[3], dims[4], dims[5])
+  return x
+end
+
+function StepConvLSTM:getDimensionForGradInput(input)
+-- if input dimension = 4, gradInput has the same size
+-- if input diemnsion = 5, gradInput size is the last 4 dim
+  local batchSize
+  local inputSize
+  local height
+  local width
+  assert(input:dim() == 5 or input:dim() == 4, 'input dimension need to be 4 or 5, get '..input:dim())
+  if(input:dim() == 5) then
+    batchSize = input:size(2)
+    inputSize = input:size(3)
+    height = input:size(4)
+    width = input:size(5)
+  elseif(input:dim() == 4) then
+    batchSize = input:size(1)
+    inputSize = input:size(2)
+    height = input:size(3)
+    width = input:size(4)
+  end
+
+  -- self.gradInput = torch.Tensor(batchSize, inputSize, height, width):fill(0)
+
+end
+
+
 function StepConvLSTM:backward(input, gradOutput, scale)
+  assert(input, 'input empty')
+  assert(gradOutput, 'gradInput empty')
+  local scale = scale or 1
+
+  if(self.bufferStep == 1 and input:dim() == 4) then
+    self:viewInput(input)
+  end
+  if(self.bufferStep == 1 and gradOutput:dim() == 4) then
+    self:viewInput(gradOutput)
+  end
   -- input
+  -- self:getDimensionForGradInput(input)
+
+  -- self.gradInput = torch.Tensor(self.bufferSize, self.batchSize, self.inputSize, self.height, self.width):fill(0)
+
   if self.step == 1 then
     self.prevCell = self.zeroTensor
     self.prevOutput = self.zeroTensor
@@ -433,22 +527,72 @@ function StepConvLSTM:backward(input, gradOutput, scale)
   local x = input
   -- print(self.gradPrevCell)
   -- assert(self.gradPrevCell)
+  -- print(gradOutput:size())
+  assert(gradOutput:dim() == 5, 'gradOutput dimension = 5 required')
+
+  assert(input:dim() == 5, 'input dimension = 5 required')
+
+  for t = self.bufferStep, 1, -1 do
+    print('bufferStep: ',self.bufferStep)
+
+    print({input[t], self.prevOutput, self.prevCell})
+    print({gradOutput[t], self.gradPrevCell})
+    local gradTable = self.module:updateGradInput({input[t], self.prevOutput, self.prevCell}, {gradOutput[t], self.gradPrevCell}, scale)
+    -- print(self.gradInput:size(), gradTable)
+    self.gradInput[t] = gradTable[1]
+    self.gradPrevOutput = gradTable[1]
+    self.gradPrevCell = gradTable[2]
+
+    --  print(gradInput_x)
+    -- gradInput_x, gradInput_cell, gradInput_outputs = , 
+
+    self.module:accGradParameters({input[t], self.prevOutput, self.prevCell}, {gradOutput[t], self.gradPrevCell})
+    -- self.module:updateParameters()
+    
+    self.step  = self.step - 1
+  end
+
+  if(self.bufferStep == 1) then
+    self:unviewInput(input)
+    self:unviewInput(gradOutput)
+  end
+
+  return self.gradInput  -- 5d
+end
 
 
-  local gradTable = self.module:backward({input, self.prevOutput, self.prevCell}, {gradOutput, self.gradPrevCell})
+function StepConvLSTM:updateGradInput(input, gradOutput)
+  assert(self.bufferStep == 1, 'can be used for one step congLSTM only')
+  local viewFlag = 0
+  if(input:dim() == 5) then 
+    self:unviewInput(input)
+    viewFlag = 1
+  end
+  local gradTable = self.module:updateOutput({input, self.prevOutput, self.prevCell}, {gradOutput, self.gradPrevCell})
   
   self.gradInput = gradTable[1]
-  self.gradPrevOutput = gradTable[1]
-  self.gradPrevCell = gradTable[2]
+  self.gradPrevOutput = gradTable[2]
+  self.gradPrevCell = gradTable[3]
+  if viewFlag then
+    self:viewInput(input)
+  end
+  return self.gradInput
+end
 
-  --  print(gradInput_x)
-  -- gradInput_x, gradInput_cell, gradInput_outputs = , 
-
+function StepConvLSTM:accGradParameters(input, gradOutput, scale)
+  assert(self.bufferStep == 1, 'can be used for one step congLSTM only')
+  local viewFlag = 0
+  if(input:dim() == 5) then 
+    self:unviewInput(input)
+    viewFlag = 1
+  end
   self.module:accGradParameters({input, self.prevOutput, self.prevCell}, {gradOutput, self.gradPrevCell})
-  -- self.module:updateParameters()
-  
-  self.step  = self.step - 1
-  return self.gradInput 
+
+  local viewFlag = 0
+  if(input:dim() == 5) then 
+    self:unviewInput(input)
+    viewFlag = 1
+  end
 end
 
 -- ===============================================================
