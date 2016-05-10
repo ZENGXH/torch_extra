@@ -6,32 +6,40 @@ print(os.date("today is %c"))
 Encapsulates a Module. 
 input: (batchSize, inputSize, height, width)
 self.output: (bufferSize, batchSize, outputSize, height, width)
+
 notice that self.output = [currentOutput1, currentOutput2, currentOutput3...]
 for each step the input concated to be: [input, currentOutput1, currentOutput2, ...]
 
-for t = 1, self.bufferSize
+for idBuffer = 1, self.bufferSize
    Input is a one bacth tensor in dim = 4: 
       currentInput = (t == 1)? input : self.output[t - 1]
 
    1. forward
       call updateOutput(currentInput) sequentially, pass through all #modules
-
-      get currentOutput: (batchSize, outputSize, height, width)
-      store output in self.output[t]
+      **********************************************************
+      * currentOutput = input                                  *
+      * currentOutput = recursiveUpdateOutput(currentOutput)   *
+      **********************************************************
+      get self.output[idBuffer] = currentOutput: (batchSize, outputSize, height, width)
+      store output in self.output[idBuffer]
 
    2. calculate loss:
       fetch the target slice: 
          currentTarget = target[t]
       currentError = criterion:forward(currentOutput, currentTarget)
       currentGradOutput = criterion:backward(currentOutput, currentTarget)
+      
 
    3. backward and getGradInput:
 
-         call updateGradInput(currentGradOutput) sequentially
-         call accGradParameters(currentInput, currentGradOutput) sequentially
-
+      call updateGradInput(currentGradOutput) sequentially
+      call accGradParameters(currentInput, currentGradOutput) sequentially
+      *********************************************************************
+      * currentGradInput = currentGradOutput                              *
+      * currentGradInput = recursiveBackward({input, currentGradInput})   *
+      *********************************************************************
          get currentGradInput, 
-         accumulate it to self.GradInput
+      accumulate it to self.GradInput
 
 end
 
@@ -46,6 +54,8 @@ function RecursiveSequential:__init(bufferSize)
    self.output = torch.Tensor() -- wait for resize
    self:start()
    self.flowOutput = {} -- serve as a buffer
+   self.criterion = nn.MSECriterion()
+
    -- table of buffers used for evaluation
    
    -- so that these buffers aren't serialized :
@@ -84,6 +94,13 @@ end
 
 
 function RecursiveSequential:autoForwardAndBackward(input, target)
+   self.step = 1
+   -- input size: batch, inputSize, height, width
+   -- output size: bufferSize, batchSize, outputSize, height, width
+   -- target size: bufferSize, batchSize, outputSize, height, width
+   -- gradOutput size: batchSize, outputSize, height, width
+   -- gradInput size: batchSize, inputSize, height, width
+
    assert(self.criterion, 'criterion required')
    -- print(criterion)
    -- assert(torch.isTypeOf(criterion, 'nn.Criterion'), 'criterion required')
@@ -94,33 +111,35 @@ function RecursiveSequential:autoForwardAndBackward(input, target)
    assert(target:size(2) == input:size(1)) -- batchSize
    assert(target:size(4) == input:size(3)) -- height
    assert(target:size(5) == input:size(4)) -- width
-
    self:getDimension(input, target:size(3))
-
-
+--[[
    typeChecking(input, self.runtimeType)
-   -- typeChecking(criterion, self.runtimeType)
    typeChecking(self.output, self.runtimeType)
    typeChecking(self.gradOutput, self.runtimeType)
    typeChecking(self.criterion, self.runtimeType)
-
+]]--
    assert(self.output:size(1) == self.bufferSize)
    assert(self.output:dim() == 5)
    local accErr = 0
 
+   local currentOutput
+   -- 
    for idBufferStep = 1, self.bufferSize do
       ---- [[ start forward ]] ----
       print('idBufferStep#', idBufferStep)
       
-      local currentOutput
+      
       if idBufferStep == 1 then currentOutput = input else currentOutput = self.output[idBufferStep - 1] end
       assert(currentOutput, 'lack currentOutput')
       -- in current idBufferStep, run all the module sequentially:
 
+      -- **********************************************
       for idModules = 1, #self.modules do
-         print('currentOutput', currentOutput:size())
+         print('forward modules', idModules,self.modules[idModules])
+         print('input: ', currentOutput:size())
          currentOutput = self:rethrowErrors(self.modules[idModules], idModules, 'updateOutput', currentOutput)
       end -- end forward for all modules
+      -- **********************************************
 
       self.output[idBufferStep] = currentOutput
       ---- [[ end forward ]] ----
@@ -128,42 +147,53 @@ function RecursiveSequential:autoForwardAndBackward(input, target)
       ---- [[ start backward ]] ---- 
 
       -- get error and gradOutput
-      local currentTarget = target[idBufferStep]:float()
+      
 
       -- accumulating all the errors for all step:
-      accErr = accErr + self.criterion:forward(currentOutput, currentTarget)
+      accErr = accErr + self.criterion:forward(self.output[idBufferStep], target[idBufferStep])
 
-      local currentGradOutput = self.criterion:backward(currentOutput, currentTarget)
+      local currentGradOutput = self.criterion:backward(self.output[idBufferStep], target[idBufferStep])
       assert(currentGradOutput, 'currentGradOutput empty')
 
       -- get gradOutput and accGradParameters
-      local currentGradInput = currentGradOutput
+      -- local currentGradInput = currentGradOutput
       for idModules = #self.modules,1, -1 do
-         print('bp modules: ', idModules,self.modules[idModules], 'currentGradInput', currentGradInput:size())
          -- print(self.modules[idModules])
-         local parameters, gradParameters = self.modules[idModules]:getParameters()
-         parameters = parameters:float()
-         gradParameters = gradParameters:float()
-         if idModules == 1 then currentInput = input else currentInput = self.modules[idModules - 1].output end
+         -- local parameters, gradParameters = self.modules[idModules]:getParameters()
+         -- parameters = parameters:float()
+         -- gradParameters = gradParameters:float()
+         if idModules == 1 then 
+            if idBufferStep == 1 then
+               currentInput = input 
+            else
+               currentInput = self.output[idBufferStep - 1]
+            end
+         else 
+            currentInput = self.modules[idModules - 1].output 
+         end
+
+         print('bp modules: ', idModules,self.modules[idModules], "currentGradInput\n", currentGradOutput:size(), "currentInput\n", currentInput:size())
+
          -- print(self.modules[idModules].modules)
-         currentGradInput = self:rethrowErrors(self.modules[idModules], idModules, 'backward', currentInput, currentGradInput)
-         assert(currentGradInput:type() == currentInput:type())
+         currentGradOutput = self:rethrowErrors(self.modules[idModules], idModules, 'backward', currentInput, currentGradOutput)
+         assert(currentGradOutput:type() == currentInput:type())
 
          -- assert(parameters:type() == currentGradInput:type())
-         if parameters:dim() ~= 0 then 
+         -- if parameters:dim() ~= 0 then 
          --   self:rethrowErrors(self.modules[i], i, 'accGradParameters', currentInput, currentGradInput, 1)
-         end
+         -- end
       end -- end backward for all modules
 
-      accGradInput = accGradInput + currentGradInput
+      self.gradInput = self.gradInput + currentGradOutput
       self.step = self.step + 1
 
       ---- [[ end backward ]] ----
 
    end -- ending idBufferStep -- 
-   assert(self.step == self.bufferSize)
-   
-   return self.output, self.gradInput, accErr
+   assert(self.step == self.bufferSize + 1, 'get step: '..self.step )
+      assert(self.output:dim() == 5)
+print('output in: ', self.output:size())
+   return self.output, accErr, self.gradInput
 end
 --[[
 function RecursiveSequential:backward(input, target)
