@@ -108,7 +108,7 @@ function RecursiveSequential:autoForwardAndBackward(input, target)
    assert(input:dim() == 4, 'fail input:dim() == 4')
    assert(target:dim() == 5, 'fail: target:dim() == 5')
    assert(target:size(1) == self.bufferSize, 'target dimension(1)'..target:size(1)..' mismatch bufferSize'..self.bufferSize)
-   assert(target:size(2) == input:size(1)) -- batchSize
+   assert(target:size(2) == input:size(1), 'batchSize unmatch:'..target:size(2)..input:size(1) ) -- batchSize
    assert(target:size(4) == input:size(3)) -- height
    assert(target:size(5) == input:size(4)) -- width
    self:getDimension(input, target:size(3))

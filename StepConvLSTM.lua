@@ -428,7 +428,9 @@ end
 
 function StepConvLSTM:maxBackWard(input, gradOutput, scale)
   assert(self.bufferStep~=1, 'maxiBp only apply for bufferStep ~= 1 StepConvLSTM')
+
   local maxiBpStep = gradOutput:size(1)/self.batchSize
+  assert(seld.bufferStep - maxiBpStep > 1, 'maxiBp should at least 2 step smaller than the bufferStep')
   print('maxi bp step is', maxiBpStep)
   local scale = scale or 1
   self:unpackBuffer(gradOutput, maxiBpStep)
