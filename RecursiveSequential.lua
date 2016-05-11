@@ -126,7 +126,7 @@ function RecursiveSequential:autoForwardAndBackward(input, target)
    -- 
    for idBufferStep = 1, self.bufferSize do
       ---- [[ start forward ]] ----
-      print('idBufferStep#', idBufferStep)
+      --print('idBufferStep#', idBufferStep)
       
       
       if idBufferStep == 1 then currentOutput = input else currentOutput = self.output[idBufferStep - 1] end
@@ -135,8 +135,8 @@ function RecursiveSequential:autoForwardAndBackward(input, target)
 
       -- **********************************************
       for idModules = 1, #self.modules do
-         print('forward modules', idModules,self.modules[idModules])
-         print('input: ', currentOutput:size())
+         --print('forward modules', idModules,self.modules[idModules])
+         --print('input: ', currentOutput:size())
          currentOutput = self:rethrowErrors(self.modules[idModules], idModules, 'updateOutput', currentOutput)
       end -- end forward for all modules
       -- **********************************************
@@ -172,7 +172,7 @@ function RecursiveSequential:autoForwardAndBackward(input, target)
             currentInput = self.modules[idModules - 1].output 
          end
 
-         print('bp modules: ', idModules,self.modules[idModules], "currentGradInput\n", currentGradOutput:size(), "currentInput\n", currentInput:size())
+         --print('bp modules: ', idModules,self.modules[idModules], "currentGradInput\n", currentGradOutput:size(), "currentInput\n", currentInput:size())
 
          -- print(self.modules[idModules].modules)
          currentGradOutput = self:rethrowErrors(self.modules[idModules], idModules, 'backward', currentInput, currentGradOutput)
@@ -192,7 +192,7 @@ function RecursiveSequential:autoForwardAndBackward(input, target)
    end -- ending idBufferStep -- 
    assert(self.step == self.bufferSize + 1, 'get step: '..self.step )
       assert(self.output:dim() == 5)
-print('output in: ', self.output:size())
+   -- print('output in: ', self.output:size())
    return self.output, accErr, self.gradInput
 end
 --[[

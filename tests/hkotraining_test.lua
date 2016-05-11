@@ -45,14 +45,14 @@ trainDataProvider = getdataTensor_hko('train', data_path)
     -- print(encoder.modules[1].modules[1])
     local parameters_encoder, gradParameters_encoder = encoder:getParameters()
     assert(parameters_encoder, 'parameters_encoder empty') 
-    parameters_encoder = parameters_encoder:normal(2, 0.1)
+    parameters_encoder = parameters_encoder:normal(0.01, 0.01)
     -- predictor = nn.SelfFeedSequencer( predictor_1 )
     predictor = nn.RecursiveSequential(opt.output_nSeq)
     						:add(predictor_conv2)
     						:add(predictor_conv3)
     						:add(encoder_predictor)
     local parameters_predictor, gradParameters_predictor = predictor:getParameters()
-    parameters_predictor = parameters_predictor:normal(2, 0.1)
+    parameters_predictor = parameters_predictor:normal(0.01, 0.01)
 
     print('number of parameters of repeatModel', parameters_encoder:size(1) + parameters_predictor:size(1))
 
@@ -114,22 +114,28 @@ function train()
 	    output, accErr, gradInput = predictor:autoForwardAndBackward(input_predictor, target_predictor)
 
 
-	    encoder_lstm0.gradPrevCell = predictor_conv2.gradPrevCell:normal(1, 0.1)
+	    encoder_lstm0.gradPrevCell = predictor_conv2.gradPrevCell
 	    encoder_lstm0:maxBackWard(input_encoder, predictor_conv2.lastGradPrevOutput)
 
-	    encoder_lstm1.gradPrevCell = predictor_conv3.gradPrevCell:normal(1, 0.1)
+	    encoder_lstm1.gradPrevCell = predictor_conv3.gradPrevCell
 	    encoder_lstm1:maxBackWard(encoder_lstm0.output, predictor_conv3.lastGradPrevOutput)
 
-	    predictor:updateParameters(1)
-	    encoder:updateParameters(1)
+	    predictor:updateParameters(0.0000001)
+	    encoder:updateParameters(0.0000001)
 
 		print("\titer",t, "err:", accErr)
-
-	    if saveOutput and math.fmod(t, opt.saveInterval) == 1 or t == 1 then
+		-- print(output:size())
+	    
+	    if math.fmod(t, opt.saveInterval) == 1 or t == 1 then
+	    	-- print(output:size())
+	    	saveImage(output_encoder, 'output_encoder', t)
 	    	saveImage(output, 'output', t)
-	    	-- saveImage(target, 'target', iter, epochSaveDir, 'output')
+	    	saveImage(target_predictor, 'target', t)
+	    	saveImage(gradInput, 'gradInput', t)
 	    	-- { Tensor(batch * depth * h * w), Tensor(batch * depth * h * w), Tensor(batch * depth * h * w), }
 		end
+		local toc = torch.toc(tic)
+		print('time used: ',toc)
 	end
 end
 

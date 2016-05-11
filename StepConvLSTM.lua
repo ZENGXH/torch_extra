@@ -144,9 +144,9 @@ function StepConvLSTM:__init(inputSize, outputSize, bufferStep, kernelSizeIn, ke
     self.gradInput = torch.Tensor(self.bufferStep * self.batchSize, self.inputSize, self.height,self.width):fill(0)
     self.cells = torch.Tensor(self.bufferStep * self.batchSize, self.outputSize, self.height, self.width):fill(0)
 
-    print('configure StepConvLSTM:')
-    print('inputSize, outputSize, bufferStep, kernelSizeIn, kernelSizeMem, stride, batchSize, height, width')
-    print(self.inputSize, self.outputSize, self.bufferStep, self.kernelSizeIn, self.kernelSizeMem, self.stride, self.batchSize, self.height, self.width)
+    --print('configure StepConvLSTM:')
+    --print('inputSize, outputSize, bufferStep, kernelSizeIn, kernelSizeMem, stride, batchSize, height, width')
+    --print(self.inputSize, self.outputSize, self.bufferStep, self.kernelSizeIn, self.kernelSizeMem, self.stride, self.batchSize, self.height, self.width)
 
     self:forget()
 
@@ -331,7 +331,7 @@ end
 function StepConvLSTM:updateOutput(input)
   assert(torch.isTensor(input))
   self:unpackBuffer(input)
-  print(self.output:size())
+  --print(self.output:size())
   self:unpackBuffer(self.output)
   self:unpackBuffer(self.cells)
 
@@ -350,7 +350,7 @@ function StepConvLSTM:updateOutput(input)
   local outputTable = {}
 
   for idStep = 1, self.bufferStep do
-    print('StepConvLSTM sequencing step: ', idStep)
+    -- print('StepConvLSTM sequencing step: ', idStep)
     assert(self.output:type() == input:type(), 'fail self.output:type() == input:type()')
 
     assert(input:type() == self.module._type, 'input:type() != self.module._type 1:'..input:type()..' and 2: '..self.module._type)
@@ -365,20 +365,20 @@ function StepConvLSTM:updateOutput(input)
     --assert(torch.isTypeOf(self.module, 'nn.Module'))
 
     -- self.recursiveTypeChecking(self.module, 'torch.FloatTensor')
-    print({input[idStep], self.initCell, self.initOutput})
+    -- print({input[idStep], self.initCell, self.initOutput})
     -- print(self.module)
     if idStep ~= 1 then
       outputTable = self.module:updateOutput({input[idStep], self.cells[idStep - 1], self.output[idStep - 1]})
     else
       outputTable = self.module:updateOutput({input[idStep], self.initCell, self.initOutput})
     end
-    print('outputTable', outputTable)
-    print({self.output, self.cells})
+    --print('outputTable', outputTable)
+    --print({self.output, self.cells})
     self.output[idStep] = outputTable[1]
     self.cells[idStep] = outputTable[2]
     self.step = self.step + 1
   end
-  print('end StepConvLSTM')
+  -- print('end StepConvLSTM')
   self.lastCell = self.cells[self.bufferStep]
   self.lastOutput = self.output[self.bufferStep]
   self:packBuffer(input)
@@ -391,7 +391,7 @@ end
 
 -- forget from empty state
 function StepConvLSTM:forget()
-  print('calling forget')
+  -- print('calling forget')
   self.step = 1
 
   self.initCell = torch.Tensor(self.batchSize, self.outputSize, self.height, self.width):fill(0)
@@ -435,7 +435,7 @@ function StepConvLSTM:maxBackWard(input, gradOutput, scale)
 
   local maxiBpStep = gradOutput:size(1)/self.batchSize
   assert(self.bufferStep - maxiBpStep > 1, 'maxiBp should at least 2 step smaller than the bufferStep')
-  print('maxi bp step is', maxiBpStep)
+  -- print('maxi bp step is', maxiBpStep)
   local scale = scale or 1
   self:unpackBuffer(gradOutput, maxiBpStep)
   self:unpackBuffer(input)
@@ -493,9 +493,9 @@ function StepConvLSTM:backward(input, gradOutput, scale)
       self.step  = self.step - 1
     end
   end
-  print('input size', {input[1], self.initCell, self.initOutput})
-  print('grad size', {gradOutput[1], self.gradPrevCell})
-  print('module output', self.module.output)
+  --print('input size', {input[1], self.initCell, self.initOutput})
+  --print('grad size', {gradOutput[1], self.gradPrevCell})
+  --print('module output', self.module.output)
   gradTable = self.module:backward({input[1], self.initCell, self.initOutput}, {gradOutput[1], self.gradPrevCell}, scale)
   self.gradInput[1] = gradTable[1]
   self.gradPrevCell = gradTable[2]
