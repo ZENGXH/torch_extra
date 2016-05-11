@@ -5,12 +5,13 @@ dofile '../RecursiveSequential.lua'
 dofile '../StepConvLSTM.lua'
 dofile '../dataProvider.lua'
 dofile '../../hko/routine-hko.lua'
-prepareModeldir_Imagedir('test_StepConvLSTM')
+dofile '../utils.lua'
+-- --prepareModeldir_Imagedir('test_StepConvLSTM')
 defaultType = 'nn.DoubleTensor'
 
 data_path = '../../../ConvLSTM/helper/'	
-trainDataProvider = getdataSeq_hko('train', data_path)
-validDataProvider = getdataSeq_hko('valid', data_path)
+trainDataProvider = getdataTensor_hko('train', data_path)
+-- validDataProvider = getdataSeq_hko('valid', data_path)
 	encoder_lstm0 = nn.StepConvLSTM(opt.nFiltersMemory[1], opt.nFiltersMemory[2],  -- 5, 15?
 	                 		opt.input_nSeq - 1, opt.kernelSize,
 	                        opt.kernelSizeMemory, opt.stride, 
@@ -65,8 +66,8 @@ validDataProvider = getdataSeq_hko('valid', data_path)
 
 function train()
 	epoch = epoch or 1  
-	local epochSaveDir = imageDir..'train-epoch'..tostring(epoch)..'/'
- 	if not paths.dirp(epochSaveDir) then os.execute('mkdir -p ' .. epochSaveDir) end
+	-- local epochSaveDir = imageDir..'train-epoch'..tostring(epoch)..'/'
+ 	-- if not paths.dirp(epochSaveDir) then os.execute('mkdir -p ' .. epochSaveDir) end
 	encoder:remember('both')
 	encoder:training()
 	predictor:remember('both') 
@@ -74,13 +75,26 @@ function train()
 
 	local accErr = 0
 
-	for t =1, 2 do
+    input_encoder = torch.Tensor((opt.input_nSeq - 1)*opt.batchSize, opt.nFiltersMemory[1], opt.inputSizeH, opt.inputSizeW):normal(1, 0.1)
+    input_predictor = torch.Tensor(opt.batchSize, opt.nFiltersMemory[1], opt.inputSizeH, opt.inputSizeW):normal(1, 0.1)
+    target_predictor = torch.Tensor((opt.output_nSeq), opt.batchSize, opt.nFiltersMemory[1], opt.inputSizeH, opt.inputSizeW):normal(1, 0.1)
+
+	for t =1, 4000 do
 	    print('==>'.." online epoch # " .. epoch .. ' [batchSize = ' .. opt.batchSize .. ']')
 	    local tic = torch.tic()
 
 	    local iter = t
 	    local trainData = trainDataProvider[t]
 
+	    input_encoder = trainData[1]:narrow(1, 1, opt.input_nSeq - 1) -- dimension1, from index 1, size = input_nSeq - 1
+	    input_predictor = trainData[1]:narrow(1, opt.input_nSeq, 1) 
+	    input_encoder:resize((opt.input_nSeq - 1)*opt.batchSize, opt.nFiltersMemory[1], opt.inputSizeH, opt.inputSizeW)
+		input_predictor:resize((1)*opt.batchSize, opt.nFiltersMemory[1], opt.inputSizeH, opt.inputSizeW)
+
+
+	    target_predictor = trainData[2]
+
+	
 	    encoder:zeroGradParameters()
 	    encoder:forget()
 	    -- encoder:type(defaultType)
@@ -88,27 +102,34 @@ function train()
 	    predictor:forget()
 	    -- predictor:type(defaultType)
 
-	    local input_encoder = torch.Tensor((opt.input_nSeq - 1)*opt.batchSize, opt.nFiltersMemory[1], opt.inputSizeH, opt.inputSizeW):normal(1, 0.1)
+
 	    local output_encoder = encoder:forward(input_encoder)
 
-
-	    print('output_encoder:', output_encoder:size())
 	    predictor_conv2.initCell = encoder_lstm0.lastCell
 	    predictor_conv3.initCell = encoder_lstm1.lastCell
 	    predictor_conv2.initOutput = encoder_lstm0.lastOutput
 	    predictor_conv3.initOutput = encoder_lstm1.lastOutput
 
-	    local input_predictor = torch.Tensor(opt.batchSize, opt.nFiltersMemory[1], opt.inputSizeH, opt.inputSizeW):normal(1, 0.1)
-	    local target_predictor = torch.Tensor((opt.output_nSeq), opt.batchSize, opt.nFiltersMemory[1], opt.inputSizeH, opt.inputSizeW):normal(1, 0.1)
 
-	    gardInput = predictor:autoForwardAndBackward(input_predictor, target_predictor)
+	    output, accErr, gradInput = predictor:autoForwardAndBackward(input_predictor, target_predictor)
 
 
 	    encoder_lstm0.gradPrevCell = predictor_conv2.gradPrevCell:normal(1, 0.1)
 	    encoder_lstm0:maxBackWard(input_encoder, predictor_conv2.lastGradPrevOutput)
 
 	    encoder_lstm1.gradPrevCell = predictor_conv3.gradPrevCell:normal(1, 0.1)
-	    encoder_lstm1:maxBackWard(input_encoder, predictor_conv3.lastGradPrevOutput)
+	    encoder_lstm1:maxBackWard(encoder_lstm0.output, predictor_conv3.lastGradPrevOutput)
+
+	    predictor:updateParameters(1)
+	    encoder:updateParameters(1)
+
+		print("\titer",t, "err:", accErr)
+
+	    if saveOutput and math.fmod(t, opt.saveInterval) == 1 or t == 1 then
+	    	saveImage(output, 'output', t)
+	    	-- saveImage(target, 'target', iter, epochSaveDir, 'output')
+	    	-- { Tensor(batch * depth * h * w), Tensor(batch * depth * h * w), Tensor(batch * depth * h * w), }
+		end
 	end
 end
 

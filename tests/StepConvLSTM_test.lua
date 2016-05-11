@@ -23,5 +23,5 @@ gradOutput = torch.randn(bufferStep * batchSize, outputSize, height, width)
 
 gradInput = net:backward(input, gradOutput)
 
-gradOutput_sub = torch.randn((bufferStep-2) * batchSize, outputSize, height, width)
+gradOutput_sub = torch.randn((2) * batchSize, outputSize, height, width)
 net:maxBackWard(input, gradOutput_sub)
