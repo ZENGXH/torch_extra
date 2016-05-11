@@ -1,6 +1,6 @@
 -- utils.lua
 print(os.date("today is %c"))
-curtime = os.date("%d%M")
+curtime = os.date("%d%H")
 print('current time: ', curtime)
 
 function typeChecking(x, defaultType)
@@ -70,3 +70,29 @@ function saveImage(figure_in, name, iter, epochSaveDir, type, numsOfOut)
     	end   	
 	end
 end
+
+
+
+function selectFreeGpu()
+	local gpuid = 1
+	local freeMemory, totalMemory = cutorch.getMemoryUsage(1)
+	print('free',freeMemory/(1024^3))
+	local freeMemory2, totalMemory = cutorch.getMemoryUsage(2)
+	print('free2',freeMemory2/(1024^3))
+	if(freeMemory2 > freeMemory) then 
+		cutorch.setDevice(2)
+		gpuid = 2
+	end
+	return gpuid
+end
+
+function checkMemory(message) 
+  	if not opt.onMac then
+
+  		print(message)
+		local freeMemory, totalMemory = cutorch.getMemoryUsage(gpuid)
+		print('free',freeMemory/(1024^3))
+	else print('not checkMemory')
+	end
+end
+
