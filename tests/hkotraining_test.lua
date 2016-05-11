@@ -101,9 +101,14 @@ function train()
 	    local input_predictor = torch.Tensor(opt.batchSize, opt.nFiltersMemory[1], opt.inputSizeH, opt.inputSizeW):normal(1, 0.1)
 	    local target_predictor = torch.Tensor((opt.output_nSeq), opt.batchSize, opt.nFiltersMemory[1], opt.inputSizeH, opt.inputSizeW):normal(1, 0.1)
 
-	    predictor:autoForwardAndBackward(input_predictor, target_predictor)
+	    gardInput = predictor:autoForwardAndBackward(input_predictor, target_predictor)
 
-	    -- target = torch.Tensor(opt.output_nSeq, )
+
+	    encoder_lstm0.gradPrevCell = predictor_conv2.gradPrevCell:normal(1, 0.1)
+	    encoder_lstm0:maxBackWard(input_encoder, predictor_conv2.lastGradPrevOutput)
+
+	    encoder_lstm1.gradPrevCell = predictor_conv3.gradPrevCell:normal(1, 0.1)
+	    encoder_lstm1:maxBackWard(input_encoder, predictor_conv3.lastGradPrevOutput)
 	end
 end
 
