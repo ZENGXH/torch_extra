@@ -116,7 +116,7 @@ function StepConvLSTM:__init(inputSize, outputSize, bufferStep, kernelSizeIn, ke
     self.bufferStep = bufferStep 
     -- the gates will store the #bufferStep data, also the maximum step for backward
 
-    self.gates = torch.Tensor() -- will be [batch/
+    -- self.gates = torch.Tensor() -- will be [batch/
     self.kernelSizeIn = kernelSizeIn or 3
     self.kernelSizeMem = kernelSizeMem or 3
     self.padIn = torch.floor(self.kernelSizeIn/2)
@@ -133,10 +133,14 @@ function StepConvLSTM:__init(inputSize, outputSize, bufferStep, kernelSizeIn, ke
 
     self.initCell = torch.Tensor(self.batchSize, self.outputSize, self.height, self.width):fill(0)
     self.initOutput = torch.Tensor(self.batchSize, self.outputSize, self.height, self.width):fill(0)
+    self.lastCell = torch.Tensor(self.batchSize, self.outputSize, self.height, self.width):fill(0)
+    self.lastOutput = torch.Tensor(self.batchSize, self.outputSize, self.height, self.width):fill(0)
+    self.lastGradInput = torch.Tensor(self.batchSize, self.inputSize, self.height, self.width):fill(0)
+
     self.gradPrevCell = torch.Tensor(self.batchSize, self.outputSize, self.height, self.width):fill(0)
 
     self.output = torch.Tensor(self.bufferStep * self.batchSize, self.outputSize, self.height, self.width):fill(0)
-    print('self output init: ', self.output:size())
+    -- print('self output init: ', self.output:size())
     self.gradInput = torch.Tensor(self.bufferStep * self.batchSize, self.inputSize, self.height,self.width):fill(0)
     self.cells = torch.Tensor(self.bufferStep * self.batchSize, self.outputSize, self.height, self.width):fill(0)
 
@@ -306,19 +310,21 @@ function StepConvLSTM:typeChecking(para, msg)
   end
 end
 
-function StepConvLSTM:unpackBuffer(x)
+function StepConvLSTM:unpackBuffer(x, bufferStepDim)
   assert(x:dim() == 4)
   local size = x:size(2)
   
   assert(size == self.inputSize or size == self.outputSize, 'get size:'..size)
-  x:resize(self.bufferStep, self.batchSize, size, self.height, self.width)
+  local bufferStepDim = bufferStepDim or self.bufferStep
+  x:resize(bufferStepDim, self.batchSize, size, self.height, self.width)
   return x
 end
 
-function StepConvLSTM:packBuffer(x)
+function StepConvLSTM:packBuffer(x, bufferStepDim)
   assert(x:dim() == 5)
   local size = x:size(3)
-  x:resize(self.bufferStep * self.batchSize, size, self.height, self.width)
+  local bufferStepDim = bufferStepDim or self.bufferStep
+  x:resize(bufferStepDim * self.batchSize, size, self.height, self.width)
   return x
 end
 
@@ -360,7 +366,7 @@ function StepConvLSTM:updateOutput(input)
 
     -- self.recursiveTypeChecking(self.module, 'torch.FloatTensor')
     print({input[idStep], self.initCell, self.initOutput})
-    print(self.module)
+    -- print(self.module)
     if idStep ~= 1 then
       outputTable = self.module:updateOutput({input[idStep], self.cells[idStep - 1], self.output[idStep - 1]})
     else
@@ -373,7 +379,8 @@ function StepConvLSTM:updateOutput(input)
     self.step = self.step + 1
   end
   print('end StepConvLSTM')
- 
+  self.lastCell = self.cells[self.bufferStep]
+  self.lastOutput = self.output[self.bufferStep]
   self:packBuffer(input)
   self:packBuffer(self.output)
   self:packBuffer(self.cells)
@@ -419,8 +426,89 @@ function StepConvLSTM:getDimensionForGradInput(input)
 
 end
 
+function StepConvLSTM:maxBackWard(input, gradOutput, scale)
+  assert(self.bufferStep~=1, 'maxiBp only apply for bufferStep ~= 1 StepConvLSTM')
+  local maxiBpStep = gradOutput:size(1)/self.batchSize
+  print('maxi bp step is', maxiBpStep)
+  local scale = scale or 1
+  self:unpackBuffer(gradOutput, maxiBpStep)
+  self:unpackBuffer(input)
+  self:unpackBuffer(self.gradInput)
+  self:unpackBuffer(self.cells)
+  self:unpackBuffer(self.output)
+
+  assert(gradOutput:dim() == 5, 'gradOutput dimension = 5 required')
+  assert(input:dim() == 5, 'input dimension = 5 required')
+  local gradTable = {}
+  -- ************ only apply for bufferStep ~= 1 StepConvLSTM ************
+  
+  for idStep = self.bufferStep, self.bufferStep - maxiBpStep + 1, -1 do
+    -- print('idStep:', idStep)
+    -- print(idStep - (self.bufferStep - maxiBpStep) + 1)
+    -- print('size',gradOutput:size())
+    gradTable = self.module:backward({input[idStep], self.cells[idStep - 1], self.output[idStep - 1]}, {gradOutput[idStep - (self.bufferStep - maxiBpStep)], self.gradPrevCell}, scale)
+    self.gradInput[idStep] = gradTable[1]
+    self.gradPrevCell = gradTable[2]
+    gradPrevOutput = gradTable[3]
+    self.step  = self.step - 1
+  end
+  
+  -- ************
+  -- self.lastGradInput = self.gradInput[1]
+  -- self.lastGradPrevOutput = gradPrevOutput
+
+  self:packBuffer(input)
+  self:packBuffer(gradOutput)
+  self:packBuffer(self.gradInput, maxiBpStep)
+  self:packBuffer(self.cells)
+  self:packBuffer(self.output)
+  return self.gradInput  -- 5d
+end
 
 function StepConvLSTM:backward(input, gradOutput, scale)
+  local scale = scale or 1
+  self:unpackBuffer(gradOutput)
+  self:unpackBuffer(input)
+  self:unpackBuffer(self.gradInput)
+  self:unpackBuffer(self.cells)
+  self:unpackBuffer(self.output)
+
+  assert(gradOutput:dim() == 5, 'gradOutput dimension = 5 required')
+  assert(input:dim() == 5, 'input dimension = 5 required')
+  local gradTable = {}
+
+  -- ****************************
+  if self.bufferStep ~= 1 then -- move 'if' out of for loop
+    for idStep = self.bufferStep, 2, -1 do
+      gradTable = self.module:backward({input[idStep], self.cells[idStep - 1], self.output[idStep - 1]}, {gradOutput[idStep], self.gradPrevCell}, scale)
+      self.gradInput[idStep] = gradTable[1]
+      self.gradPrevCell = gradTable[2]
+      gradPrevOutput = gradTable[3]
+      self.step  = self.step - 1
+    end
+  end
+  print('input size', {input[1], self.initCell, self.initOutput})
+  print('grad size', {gradOutput[1], self.gradPrevCell})
+  print('module output', self.module.output)
+  gradTable = self.module:backward({input[1], self.initCell, self.initOutput}, {gradOutput[1], self.gradPrevCell}, scale)
+  self.gradInput[1] = gradTable[1]
+  self.gradPrevCell = gradTable[2]
+  gradPrevOutput = gradTable[3]
+  self.step  = self.step - 1
+  -- ****************************
+  self.lastGradInput = self.gradInput[1]
+  self.lastGradPrevOutput = gradPrevOutput
+
+  self:packBuffer(input)
+  self:packBuffer(gradOutput)
+  self:packBuffer(self.gradInput)
+  self:packBuffer(self.cells)
+  self:packBuffer(self.output)
+  return self.gradInput  -- 5d
+end
+
+
+function StepConvLSTM:updateGradInput(input, gradOutput, scale)
   local scale = scale or 1
   self:unpackBuffer(input)
   self:unpackBuffer(gradOutput)
@@ -432,23 +520,22 @@ function StepConvLSTM:backward(input, gradOutput, scale)
   assert(input:dim() == 5, 'input dimension = 5 required')
   local gradTable = {}
 
-  for idStep = self.bufferStep, 1, -1 do
-    print('idStep, ', idStep)
-  -- print({input[idStep], self.cells[idStep - 1], self.output[idStep - 1]})
-  -- print({gradOutput[idStep], self.gradPrevCell})
-
-    if idStep ~= 1 then
-      gradTable = self.module:backward({input[idStep], self.cells[idStep - 1], self.output[idStep - 1]}, {gradOutput[idStep], self.gradPrevCell}, scale)
-    else
-      gradTable = self.module:backward({input[idStep], self.initCell, self.initOutput}, {gradOutput[idStep], self.gradPrevCell}, scale)
+  -- ************************
+  if self.bufferStep ~= 1 then -- move 'if' out of for loop
+    for idStep = self.bufferStep, 2, -1 do
+      gradTable = self.module:updateGradInput({input[idStep], self.cells[idStep - 1], self.output[idStep - 1]}, {gradOutput[idStep], self.gradPrevCell}, scale)
+      self.gradInput[idStep] = gradTable[1]
+      self.gradPrevCell = gradTable[2]
+      gradPrevOutput = gradTable[3]
+      self.step  = self.step - 1
     end
-
-    self.gradInput[idStep] = gradTable[1]
-    self.gradPrevCell = gradTable[2]
-    gradPrevOutput = gradTable[3]
-
-    self.step  = self.step - 1
   end
+  gradTable = self.module:updateGradInput({input[1], self.initCell, self.initOutput}, {gradOutput[1], self.gradPrevCell}, scale)
+  self.gradInput[idStep] = gradTable[1]
+  self.gradPrevCell = gradTable[2]
+  gradPrevOutput = gradTable[3]
+  self.step  = self.step - 1
+  -- ************************
 
   self:packBuffer(input)
   self:packBuffer(gradOutput)
@@ -458,41 +545,36 @@ function StepConvLSTM:backward(input, gradOutput, scale)
   return self.gradInput  -- 5d
 end
 
---[[
-function StepConvLSTM:updateGradInput(input, gradOutput)
-  assert(self.bufferStep == 1, 'can be used for one step congLSTM only')
-  local viewFlag = 0
-  if(input:dim() == 5) then 
-    self:unviewInput(input)
-    viewFlag = 1
+function StepConvLSTM:accGradParameters(input, gradOutput, lr)
+  local lr = lr or 1
+  self:unpackBuffer(input)
+  self:unpackBuffer(gradOutput)
+  self:unpackBuffer(self.gradInput)
+  self:unpackBuffer(self.cells)
+  self:unpackBuffer(self.output)
+
+  assert(gradOutput:dim() == 5, 'gradOutput dimension = 5 required')
+  assert(input:dim() == 5, 'input dimension = 5 required')
+  local gradTable = {}
+
+  -- ************************
+  if self.bufferStep ~= 1 then -- move 'if' out of for loop
+    for idStep = self.bufferStep, 2, -1 do
+      self.module:accGradParameters({input[1], self.cells[idStep - 1], self.output[idStep - 1]}, {gradOutput[idStep], self.gradPrevCell}, scale)
+      self.gradPrevCell = self.module.gradInput[2]
+    end
   end
-  local gradTable = self.module:updateOutput({input, self.prevOutput, self.prevCell}, {gradOutput, self.gradPrevCell})
-  
-  self.gradInput = gradTable[1]
-  self.gradPrevOutput = gradTable[2]
-  self.gradPrevCell = gradTable[3]
-  if viewFlag then
-    self:viewInput(input)
-  end
-  return self.gradInput
+  self.module:accGradParameters({input[1], self.initCell, self.initOutput}, {gradOutput[1], self.gradPrevCell}, scale)
+  -- *************************
+
+  self:packBuffer(input)
+  self:packBuffer(gradOutput)
+  self:packBuffer(self.gradInput)
+  self:packBuffer(self.cells)
+  self:packBuffer(self.output)
+  return 
 end
 
-function StepConvLSTM:accGradParameters(input, gradOutput, scale)
-  assert(self.bufferStep == 1, 'can be used for one step congLSTM only')
-  local viewFlag = 0
-  if(input:dim() == 5) then 
-    self:unviewInput(input)
-    viewFlag = 1
-  end
-  self.module:accGradParameters({input, self.prevOutput, self.prevCell}, {gradOutput, self.gradPrevCell})
-
-  local viewFlag = 0
-  if(input:dim() == 5) then 
-    self:unviewInput(input)
-    viewFlag = 1
-  end
-end
-]]--
 -- ===============================================================
 function StepConvLSTM:initBias(forgetBias, otherBias)
   local fBias = forgetBias or 1
