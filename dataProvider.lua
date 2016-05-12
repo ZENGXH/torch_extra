@@ -254,17 +254,18 @@ function getdataTensor_hko(mode, data_path)
    end
 
    function datasetSeq:selectTensor(index)
-      if simdata_verbose then
+      if verbose then
          print('selectSeq')
       end
       local input_batch = torch.Tensor(opt.input_nSeq, opt.batchSize, opt.imageDepth, opt.imageH, opt.imageW)
       local output_batch = torch.Tensor(opt.output_nSeq, opt.batchSize, opt.imageDepth, opt.imageH, opt.imageW)
 
+      index = math.fmod(index, nsamples/opt.batchSize-opt.input_nSeq + 1)
 
 
       -- index range from 1 to numsOfBatch
       -- for each selection index, jump #opt.batchSize of heads 
-      -- if opt.batchSize is 8, then it can be 1, 9, 17, ...
+      -- if opt.batchSize is 8, then enterSeqHeads can be 1, 9, 17, ...
       -- corresponding to 
       -- seqHeads[1], seqHeads[9], seqHeads[17]    
       local enterSeqHeads = (index - 1) * opt.batchSize + 1 
