@@ -213,6 +213,17 @@ function getdataTensor_hko(mode, data_path)
    print (mode .. ' dataload: ' .. nsamples .. ' ' .. nseq .. ' ' .. nrows .. ' ' .. ncols )
 
    ------------- read the powerful txt file! ------
+   --[[
+      description:
+         fileList: 
+            {all possible training data from beginning to the end (overlapped)}
+         seqHeads:
+            depend on the nseq: the line number of each set of training data in the fileList
+            {1, 21, 41, 61, 81, 101...} if nseq = 20
+         enterSeqHeads:
+            when reading the seqHeads, we need to jump #opt.batchSize everytime
+            {1, 3, 6, 9, 12...} if opt.batchSize = 3
+   --]]
    local fileList = {}
    
    local id = 1
@@ -260,7 +271,7 @@ function getdataTensor_hko(mode, data_path)
       local input_batch = torch.Tensor(opt.input_nSeq, opt.batchSize, opt.imageDepth, opt.imageH, opt.imageW)
       local output_batch = torch.Tensor(opt.output_nSeq, opt.batchSize, opt.imageDepth, opt.imageH, opt.imageW)
 
-      index = math.fmod(index, nsamples/opt.batchSize-opt.input_nSeq + 1)
+      index = math.fmod(index, math.floor(nsamples/opt.batchSize) - 1)
 
 
       -- index range from 1 to numsOfBatch
