@@ -311,6 +311,9 @@ function getdataTensor_hko(mode, data_path)
 
          ------------- output seq ------------
          for k = 1,  opt.output_nSeq do
+            if(lineInd > nseq * nsamples)then
+               print('current index',index)
+            end
             local out = image.load(data_path..'data/'..fileList[lineInd])
             --local out = dataMask:quick4Mask3Dforward(ori)
             -- out = image.rotate(out, 1.5)
