@@ -526,7 +526,7 @@ function StepConvLSTM:updateGradInput(input, gradOutput, scale)
   assert(gradOutput:dim() == 5, 'gradOutput dimension = 5 required')
   assert(input:dim() == 5, 'input dimension = 5 required')
   local gradTable = {}
-
+  local gradPrevOutput
   -- ************************
   if self.bufferStep ~= 1 then -- move 'if' out of for loop
     for idStep = self.bufferStep, 2, -1 do
@@ -563,7 +563,8 @@ function StepConvLSTM:accGradParameters(input, gradOutput, lr)
   assert(gradOutput:dim() == 5, 'gradOutput dimension = 5 required')
   assert(input:dim() == 5, 'input dimension = 5 required')
   local gradTable = {}
-
+  local gradPrevOutput
+  
   -- ************************
   if self.bufferStep ~= 1 then -- move 'if' out of for loop
     for idStep = self.bufferStep, 2, -1 do

@@ -18,7 +18,7 @@ function typeChecking(x, defaultType)
 	end
 end	
 
-function saveImage(figure_in, name, iter, epochSaveDir, type, numsOfOut)
+function saveImage(figure_in, name, iter,epochSaveDir,  type, numsOfOut)
 
 	local numsOfOut = numsOfOut or 0
 	local figure = torch.Tensor()
@@ -36,7 +36,7 @@ function saveImage(figure_in, name, iter, epochSaveDir, type, numsOfOut)
 	    	if img:size(2) ~= 3 then
 		    	img = img:narrow(1, 1, 1)
 		    end
-	    	img = img:mul(1/img:max())
+	    	img = img/img:max()
 --   	if name == 'flow' then
 --    		  print('1: mean flow: %.4f flow range: u = %.3f .. %.3f', img[1]:mean(), img[1]:min(), img[1]:max())
 --    		  print('2: mean flow: %.4f flow range: u = %.3f .. %.3f', img[2]:mean(), img[2]:min(), img[2]:max())
@@ -95,4 +95,22 @@ function checkMemory(message)
 	else print('not checkMemory')
 	end
 end
+
+function unpackBuffer(x, bufferStepDim)
+	assert(x:dim() == 4)
+	-- local bufferSize = x:size(1)/opt.batchSize
+	local bufferStepDim = bufferStepDim or x:size(1)/opt.batchSize
+	x:resize(bufferStepDim, x:size(1)/bufferStepDim, x:size(2), x:size(3), x:size(4))
+	return x
+end	
+
+function packBuffer(x, bufferStepDim)
+	assert(x:dim() == 5)
+	-- local bufferSize = x:size(1)/opt.batchSize
+	local bufferStepDim = bufferStepDim or nil -- do not need in deed
+	x:resize(x:size(1) * x:size(2), x:size(3), x:size(4), x:size(5))
+	return x
+end	
+
+
 

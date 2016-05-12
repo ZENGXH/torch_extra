@@ -107,7 +107,7 @@ function runtest.hkotraning()
 
 	    criterion = nn.MSECriterion()
 
-		for t =1, 100 do
+		for t =1, 30000 do
 		    print('==>'.." online epoch # " .. epoch .. ' [batchSize = ' .. opt.batchSize .. ']')
 		    local tic = torch.tic()
 		    
@@ -124,6 +124,8 @@ function runtest.hkotraning()
 		    -- print('target size', target_predictor:size())
 		    input_predictor = torch.Tensor(bufferSize * opt.batchSize, opt.nFiltersMemory[1], opt.inputSizeH, opt.inputSizeW):fill(0)
 		    input_encoder_predictor = torch.Tensor(opt.output_nSeq, opt.batchSize, opt.nFiltersMemory[2]*2, opt.inputSizeH, opt.inputSizeW)
+		    thre = torch.Tensor(opt.output_nSeq*opt.batchSize, opt.nFiltersMemory[1], opt.inputSizeH, opt.inputSizeW):fill(0.1)
+		    mask = 10 * torch.gt(target_predictor,thre):double()
 
 	    if not opt.onMac then
 	    	encoder:cuda()
@@ -135,8 +137,13 @@ function runtest.hkotraning()
 			input_predictor = input_predictor:cuda()
 	    	target_predictor = target_predictor:cuda()
 			input_encoder_predictor = input_encoder_predictor:cuda()
-
+			-- thre = thre:cuda()
+			mask = mask:cuda()
 	    end
+    	    local parameters_encoder, gradParameters_encoder = encoder:getParameters()
+		    assert(parameters_encoder, 'parameters_encoder empty') 
+
+
 		    encoder_lstm1.module:zeroGradParameters()
 		    encoder_lstm0.module:zeroGradParameters()
 
@@ -155,13 +162,13 @@ function runtest.hkotraning()
 		    -- encoder_lstm0:zeroGradParameters()
 		   
 		    -- mytester:assert(gradParameters_encoder:mean() == 0, 'mean is '..gradParameters_encoder:mean())
-		    mytester:assert(g_encoder_lstm0:mean() == 0, 'mean is '..g_encoder_lstm0:mean())
-		    mytester:assert(g_encoder_lstm1:mean() == 0, 'mean is '..g_encoder_lstm1:mean())
+		    mytester:assert(gradParameters_encoder:mean() == 0, 'mean is '..g_encoder_lstm0:mean())
+		    --mytester:assert(g_encoder_lstm1:mean() == 0, 'mean is '..g_encoder_lstm1:mean())
 		    
 		    -- encoder:type(defaultType)
 		    predictor:zeroGradParameters()
 
-		    mytester:assert(g_predictor_conv2:mean() == 0, 'mean is '..g_predictor_conv2:mean())
+		    --mytester:assert(g_predictor_conv2:mean() == 0, 'mean is '..g_predictor_conv2:mean())
 		    -- mytester:assert(g_encoder_lstm1:mean() == 0, 'mean is '..g_encoder_lstm1:mean())
 		    
 		    -- predictor:type(defaultType)
@@ -182,9 +189,8 @@ function runtest.hkotraning()
 		    -- print(predictor_conv3.module)
 		    output = predictor_conv3:forward(output)
 ]]--
-			print('predictor')
+			--print('predictor')
 			output_predictor = predictor:forward(input_predictor)
-		    thre = torch.Tensor(opt.output_nSeq*opt.batchSize, opt.nFiltersMemory[1], opt.inputSizeH, opt.inputSizeW):fill(0.1)
 		    packBuffer(target_predictor)
   
 		    --mytester:assert(output_predictor:size(1) == target_predictor:size(1))
@@ -214,7 +220,6 @@ function runtest.hkotraning()
 		    packBuffer(input_encoder_predictor)
 		    prediction = encoder_predictor:forward(input_encoder_predictor)
 		    -- unpackBuffer(input_encoder_predictor)
-		    mask = 10 * torch.gt(target_predictor,thre):double()
 		    target_predictor = torch.add(target_predictor, mask)
 		    accErr = criterion:forward(prediction, target_predictor)
 		    gradOutput =  criterion:backward(prediction, target_predictor)
@@ -244,7 +249,7 @@ function runtest.hkotraning()
 		    predictor_conv3:backward(predictor_conv2.output, predictor_conv3_grad_output)
 
 		    -- *****************************************
-		    print('prediction mean:' , prediction:mean(), 'target mean ', target_predictor:mean(), 'predictor_conv2_grad_output: ',predictor_conv2_grad_output:mean())
+		    --print('prediction mean:' , prediction:mean(), 'target mean ', target_predictor:mean(), 'predictor_conv2_grad_output: ',predictor_conv2_grad_output:mean())
 
 
 
@@ -296,6 +301,7 @@ function runtest.hkotraning()
 			end
 			local toc = torch.toc(tic)
 			print('time used: ',toc)
+			collectgarbage()
 		end
 end
 
