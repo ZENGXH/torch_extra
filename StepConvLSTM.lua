@@ -250,8 +250,8 @@ function StepConvLSTM:nngraphModel(i2g, o2g)
   table.insert(inputs, nn.Identity()()) -- prev_h[L]
   table.insert(inputs, nn.Identity()()) -- prev_c[L]
 
-  local x, prev_h, prev_c = self:unpackBuffer(inputs)
-
+  -- local x, prev_h, prev_c = self:unpackBuffer(inputs)
+  local x, prev_h, prev_c = inputs[1], inputs[2], inputs[3]
   -- evaluate the input sums at once for efficiency
 
   local i2h = i2g(x):annotate{name='i2h'}
@@ -314,7 +314,7 @@ function StepConvLSTM:unpackBuffer(x, bufferStepDim)
   assert(x:dim() == 4)
   local size = x:size(2)
   
-  assert(size == self.inputSize or size == self.outputSize, 'get size:'..size)
+  assert(size == self.inputSize or size == self.outputSize, 'dimention2 of variable not input/output size, get size:'..x:size(1)..', '..x:size(2)..', '..x:size(3)..', '..x:size(4))
   local bufferStepDim = bufferStepDim or self.bufferStep
   x:resize(bufferStepDim, self.batchSize, size, self.height, self.width)
   return x
@@ -329,6 +329,8 @@ function StepConvLSTM:packBuffer(x, bufferStepDim)
 end
 
 function StepConvLSTM:updateOutput(input)
+  -- local p, g = self.module:getParameters()
+  -- assert(g:mean() == 0, 'gradient not zero at the begin'..g:mean())
   assert(torch.isTensor(input))
   self:unpackBuffer(input)
   --print(self.output:size())
@@ -341,18 +343,17 @@ function StepConvLSTM:updateOutput(input)
   end
 
   assert(input:dim() == 5, 'input dimension, 5 required get'..input:dim())
-
   assert(input:size(1) == self.bufferStep)
   assert(input:size(2) == self.batchSize, 'inputBatch dim2 = batchSize require')
   assert(input:size(3) == self.inputSize)
   assert(input:size(4) == self.height)
   assert(input:size(5) == self.width) 
+
   local outputTable = {}
 
   for idStep = 1, self.bufferStep do
     -- print('StepConvLSTM sequencing step: ', idStep)
     assert(self.output:type() == input:type(), 'fail self.output:type() == input:type()')
-
     assert(input:type() == self.module._type, 'input:type() != self.module._type 1:'..input:type()..' and 2: '..self.module._type)
     --assert(self.prevOutput:size(1) == self.batchSize,'fail self.prevOutput:size(1) == self.batchSize' )
     --assert(self.prevOutput:size(2) == self.outputSize)
@@ -482,7 +483,7 @@ function StepConvLSTM:backward(input, gradOutput, scale)
   assert(gradOutput:dim() == 5, 'gradOutput dimension = 5 required')
   assert(input:dim() == 5, 'input dimension = 5 required')
   local gradTable = {}
-
+  local gradPrevOutput
   -- ****************************
   if self.bufferStep ~= 1 then -- move 'if' out of for loop
     for idStep = self.bufferStep, 2, -1 do
@@ -591,6 +592,10 @@ function StepConvLSTM:initBias(forgetBias, otherBias)
   self.forgetGate.modules[2].modules[1].bias:fill(fBias)
 end
 
+
+function StepConvLSTM:zeroGradParameters()
+  self.module:zeroGradParameters()
+end
 --[[
 function StepConvLSTM:__tostring__()
   print('configure StepConvLSTM:')
