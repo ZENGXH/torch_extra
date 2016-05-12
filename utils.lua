@@ -75,6 +75,9 @@ end
 
 function selectFreeGpu()
 	local gpuid = 1
+	if opt.onMac then
+		return 0
+	end
 	local freeMemory, totalMemory = cutorch.getMemoryUsage(1)
 	print('free',freeMemory/(1024^3))
 	local freeMemory2, totalMemory = cutorch.getMemoryUsage(2)
@@ -86,13 +89,14 @@ function selectFreeGpu()
 	return gpuid
 end
 
-function checkMemory(message) 
+function checkMemory(message, gpuid) 
   	if not opt.onMac then
-
+  		local gpuid = gpuid or 1
   		print(message)
 		local freeMemory, totalMemory = cutorch.getMemoryUsage(gpuid)
 		print('free',freeMemory/(1024^3))
-	else print('not checkMemory')
+	else 
+		print('not checkMemory')
 	end
 end
 
@@ -112,5 +116,38 @@ function packBuffer(x, bufferStepDim)
 	return x
 end	
 
+-- weight init adapted from ConvLSTM/weight-init.lua --
+-- "Efficient backprop"
+-- Yann Lecun, 1998
+function w_init_heuristic(fan_in, fan_out)
+   return math.sqrt(1/(3*fan_in))
+end
 
 
+-- "Understanding the difficulty of training deep feedforward neural networks"
+-- Xavier Glorot, 2010
+function w_init_xavier(fan_in, fan_out)
+   return math.sqrt(2/(fan_in + fan_out))
+end
+
+
+-- "Understanding the difficulty of training deep feedforward neural networks"
+-- Xavier Glorot, 2010
+function w_init_xavier_caffe(fan_in, fan_out)
+   return math.sqrt(1/fan_in)
+end
+
+
+-- "Delving Deep into Rectifiers: Surpassing Human-Level Performance on ImageNet Classification"
+-- Kaiming He, 2015
+function w_init_kaiming(fan_in, fan_out)
+   return math.sqrt(4/(fan_in + fan_out))
+end
+
+function w_init(m)
+	print('weight init: xavier')
+    m:reset(w_init_xavier(m.nInputPlane*m.kH*m.kW, m.nOutputPlane*m.kH*m.kW))
+    if m.bias then
+    	m.bias:zero()
+    end
+end

@@ -21,6 +21,7 @@ function runtest.hkotraning()
 		require 'cunn'
 		require 'cutorch'
 	end
+	local gpuid = selectFreeGpu()
 	local data_path
 	if not opt.onMac then
 		data_path = '/csproject/dygroup2/xiaohui/ConvLSTM/helper/'
@@ -29,6 +30,7 @@ function runtest.hkotraning()
 	end
 	nn.StepConvLSTM.usenngraph = true
 	trainDataProvider = getdataTensor_hko('train', data_path)
+	assert(trainDataProvider[10000000])
 	-- validDataProvider = getdataSeq_hko('valid', data_path)
 		encoder_lstm0 = nn.StepConvLSTM(opt.nFiltersMemory[1], opt.nFiltersMemory[2],  -- 5, 15?
 		                 		opt.input_nSeq , opt.kernelSize,
@@ -39,7 +41,7 @@ function runtest.hkotraning()
 		                 		opt.input_nSeq , opt.kernelSize,
 		                        opt.kernelSizeMemory, opt.stride, 
 		                        opt.batchSize, opt.inputSizeW, opt.inputSizeH, defaultType) -- without nngraph
-
+		
 		bufferSize = opt.output_nSeq - 1
 	    predictor_conv2 = nn.StepConvLSTM(opt.nFiltersMemory[1], opt.nFiltersMemory[2],  -- 5, 15?
 		                 		bufferSize, opt.kernelSize,
@@ -54,9 +56,7 @@ function runtest.hkotraning()
 
 	    encoder = nn.Sequential():add(encoder_lstm0):add(encoder_lstm1)
 	    -- print(encoder.modules[1].modules[1])
-	    local parameters_encoder, gradParameters_encoder = encoder:getParameters()
-	    assert(parameters_encoder, 'parameters_encoder empty') 
-	    parameters_encoder = parameters_encoder:normal(0.01, 0.01)
+
 	    -- predictor = nn.SelfFeedSequencer( predictor_1 )
 	    --[[predictor = nn.RecursiveSequential(opt.output_nSeq)
 	    						:add(predictor_conv2)
@@ -68,13 +68,10 @@ function runtest.hkotraning()
 	    										math.floor(opt.decoderKernelSize / 2), 
 	    										math.floor(opt.decoderKernelSize / 2))
 
-
-	    local parameters_predictor, gradParameters_predictor = predictor:getParameters()
-	    parameters_predictor = parameters_predictor:normal(0.01, 0.01)
-	    local parameters_encoder_predictor, gradParameters_encoder_predictor = encoder_predictor:getParameters()
-	    parameters_encoder_predictor = parameters_encoder_predictor:normal(0.01, 0.01)
-
-	    print('number of parameters of repeatModel', parameters_encoder:size(1) + parameters_predictor:size(1))
+		w_init(encoder_predictor)
+	    print('number of parameters of repeatModel', encoder:getParameters():size(1) 
+	    											+ predictor:getParameters():size(1)
+	    											+ encoder_predictor:getParameters():size(1) )
 
 	    print('encoder')
 	  	print(encoder)
@@ -82,11 +79,11 @@ function runtest.hkotraning()
 	  	print(predictor)
 	  	
 
-	  	local p_encoder_lstm0, g_encoder_lstm0 = encoder_lstm0:getParameters()
-	  	local p_encoder_lstm1, g_encoder_lstm1 = encoder_lstm1:getParameters()
-	  	assert(p_encoder_lstm1:size(1) + p_encoder_lstm0:size(1) == parameters_encoder:size(1) )
-	  	local p_predictor_conv2, g_predictor_conv2 = predictor_conv2:getParameters()
-	  	mytester:assertTensorEq(p_encoder_lstm0, parameters_encoder:narrow(1, 1,  p_encoder_lstm0:size(1)))
+	  	-- local p_encoder_lstm0, g_encoder_lstm0 = encoder_lstm0:getParameters()
+	  	-- local p_encoder_lstm1, g_encoder_lstm1 = encoder_lstm1:getParameters()
+	  	-- assert(p_encoder_lstm1:size(1) + p_encoder_lstm0:size(1) == encoder:getParameters():size(1))
+	  	-- local p_predictor_conv2, g_predictor_conv2 = predictor_conv2:getParameters()
+	  	-- mytester:assertTensorEq(p_encoder_lstm0, parameters_encoder:narrow(1, 1,  p_encoder_lstm0:size(1)))
 		-----------------------------------  building model done ----------------------------------
 
 
@@ -113,7 +110,9 @@ function runtest.hkotraning()
 		    
 		    local iter = t
 		    local trainData = trainDataProvider[t]
-		    
+		    if t < 5 then
+		    	checkMemory('start iter', gpuid)
+		    end
 		    input_encoder = trainData[1]
 		    --input_encoder = trainData[1]:narrow(1, 1, opt.input_nSeq - 1) -- dimension1, from index 1, size = input_nSeq - 1
 		    --input_predictor = trainData[1]:narrow(1, opt.input_nSeq, 1) 
@@ -140,9 +139,17 @@ function runtest.hkotraning()
 			-- thre = thre:cuda()
 			mask = mask:cuda()
 	    end
+--[[
     	    local parameters_encoder, gradParameters_encoder = encoder:getParameters()
 		    assert(parameters_encoder, 'parameters_encoder empty') 
+		    print('encoder parameters mean: ', parameters_encoder:mean())
 
+    	    local parameters, gradParameters = predictor:getParameters()
+		    print('predictor parameters mean: ', parameters:mean())
+
+    	    parameters, gradParameters = encoder_predictor:getParameters()
+		    print('encoder_predictor parameters mean: ', parameters:mean())
+]]--
 
 		    encoder_lstm1.module:zeroGradParameters()
 		    encoder_lstm0.module:zeroGradParameters()
@@ -162,7 +169,7 @@ function runtest.hkotraning()
 		    -- encoder_lstm0:zeroGradParameters()
 		   
 		    -- mytester:assert(gradParameters_encoder:mean() == 0, 'mean is '..gradParameters_encoder:mean())
-		    mytester:assert(gradParameters_encoder:mean() == 0, 'mean is '..g_encoder_lstm0:mean())
+		    -- mytester:assert(gradParameters_encoder:mean() == 0, 'mean is '..gradParameters_encoder:mean())
 		    --mytester:assert(g_encoder_lstm1:mean() == 0, 'mean is '..g_encoder_lstm1:mean())
 		    
 		    -- encoder:type(defaultType)
@@ -272,7 +279,7 @@ function runtest.hkotraning()
 
 		    mytester:assertTensorEq(predictor_conv2.initCell, encoder_lstm0.lastCell, 0.0001)
 
-			print("\titer",t, "err:", accErr)
+			print("\titer",t, "err:", accErr*10000)
 			-- print(output:size())
 		    
 		    if math.fmod(t, opt.saveInterval) == 1 or t == 1 then
@@ -301,7 +308,13 @@ function runtest.hkotraning()
 			end
 			local toc = torch.toc(tic)
 			print('time used: ',toc)
+		    if t < 5 then
+		    	checkMemory('after iter', gpuid)
+		    end
 			collectgarbage()
+		    if t < 5 then
+		    	checkMemory('after collectgarbage', gpuid)
+		    end
 		end
 end
 

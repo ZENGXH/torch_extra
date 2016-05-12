@@ -177,7 +177,9 @@ function StepConvLSTM:buildModel()
     o2g = nn.SpatialConvolution(self.outputSize, self.outputSize*4, 
                                   self.kernelSizeMem, self.kernelSizeMem, 
                                   self.stride, self.stride, 
-                                  self.padMem, self.padMem) 
+                                  self.padMem, self.padMem)
+    w_init(i2g)
+    w_init(o2g)
    if self.usenngraph then
       print('usting nngraph')
       return self:nngraphModel(i2g, o2g)
