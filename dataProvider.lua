@@ -271,7 +271,7 @@ function getdataTensor_hko(mode, data_path)
       local input_batch = torch.Tensor(opt.input_nSeq, opt.batchSize, opt.imageDepth, opt.imageH, opt.imageW)
       local output_batch = torch.Tensor(opt.output_nSeq, opt.batchSize, opt.imageDepth, opt.imageH, opt.imageW)
 
-      index = math.fmod(index, math.floor(nsamples/opt.batchSize) - 1)
+      index = math.fmod(index, math.floor(nsamples/opt.batchSize)) + 1
 
 
       -- index range from 1 to numsOfBatch
@@ -281,6 +281,7 @@ function getdataTensor_hko(mode, data_path)
       -- seqHeads[1], seqHeads[9], seqHeads[17]    
       local enterSeqHeads = (index - 1) * opt.batchSize + 1 
 
+      -- print('index', index, math.fmod(index, math.floor(nsamples/opt.batchSize)))
 
       -- selectIndStart start from 1, nseq*opt.batchSize ... opt.batciSize*nseq samples... 2 * nseq*opt.batchSize
       -- for different selection, jump #opt.batchSize of head, ie jump #opt.batchSize samples
@@ -311,9 +312,7 @@ function getdataTensor_hko(mode, data_path)
 
          ------------- output seq ------------
          for k = 1,  opt.output_nSeq do
-            if(lineInd > nseq * nsamples)then
-               print('current index',index)
-            end
+            
             local out = image.load(data_path..'data/'..fileList[lineInd])
             --local out = dataMask:quick4Mask3Dforward(ori)
             -- out = image.rotate(out, 1.5)
