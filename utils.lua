@@ -18,8 +18,12 @@ function typeChecking(x, defaultType)
 	end
 end	
 
-function saveImage(figure_in, name, iter,epochSaveDir,  type, numsOfOut)
-
+function saveImage(figure_in, name, iter,epochSaveDir, type, numsOfOut, pack)
+	local pack = pack or false
+	local figure_in = figure_in
+	if pack and figure_in:dim() == 4 then
+		figure_in = unpackBuffer(figure_in)
+	end
 	local numsOfOut = numsOfOut or 0
 	local figure = torch.Tensor()
 	local epochSaveDir = epochSaveDir or './data/'..curtime..'temp/'
@@ -46,13 +50,13 @@ function saveImage(figure_in, name, iter,epochSaveDir,  type, numsOfOut)
 		    image.save(epochSaveDir..'iter-'..tostring(iter)..'-'..name..'-n'..tostring(numsOfOut)..'.png',  img)
 		elseif dim == 4 then -- batch, input/outputSize, h, w
 			-- print('save 4')
-			saveImage(figure_in[1], name, iter, epochSaveDir, type, numsOfOut)
+			saveImage(figure_in[1], name, iter, epochSaveDir, type, numsOfOut, false)
 		elseif dim == 5 then -- bufferStep, batch, input/outputSize, h, w
 			-- print('save 5', figure_in:size(1) )
 			local size = figure_in:size(1) 
 			for t = 1, size do
 				numsOfOut = t
-				saveImage(figure_in[numsOfOut], name, iter, epochSaveDir, type, numsOfOut)
+				saveImage(figure_in[numsOfOut], name, iter, epochSaveDir, type, numsOfOut, false)
 			end
 		end
 
@@ -104,7 +108,7 @@ function unpackBuffer(x, bufferStepDim)
 	assert(x:dim() == 4)
 	-- local bufferSize = x:size(1)/opt.batchSize
 	local bufferStepDim = bufferStepDim or x:size(1)/opt.batchSize
-	x:resize(bufferStepDim, x:size(1)/bufferStepDim, x:size(2), x:size(3), x:size(4))
+	x = x:view(bufferStepDim, x:size(1)/bufferStepDim, x:size(2), x:size(3), x:size(4))
 	return x
 end	
 
@@ -112,7 +116,13 @@ function packBuffer(x, bufferStepDim)
 	assert(x:dim() == 5)
 	-- local bufferSize = x:size(1)/opt.batchSize
 	local bufferStepDim = bufferStepDim or nil -- do not need in deed
-	x:resize(x:size(1) * x:size(2), x:size(3), x:size(4), x:size(5))
+	if not x:isContiguous() then
+		local temp = x.new()
+		temp:resizeAs(x):copy(x)
+		x = temp
+	end
+	x = x:view(x:size(1) * x:size(2), x:size(3), x:size(4), x:size(5))
+
 	return x
 end	
 

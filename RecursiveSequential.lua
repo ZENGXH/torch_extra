@@ -256,7 +256,7 @@ end
 
 function RecursiveSequential:forward(input, outputSeqLength)
    -- WARNING! only use when no backward needed
-   assert(torch.isTensor(inputBatch))
+   assert(torch.isTensor(input))
    assert(input:dim() == 4, 'fail input:dim() == 4')
    assert(target:dim() == 5, 'fail: target:dim() == 5')
    assert(target:size(1) == self.bufferSize, 'target dimension(1)'..target:size(1)..' mismatch bufferSize'..self.bufferSize)

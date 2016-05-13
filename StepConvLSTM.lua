@@ -153,17 +153,6 @@ function StepConvLSTM:__init(inputSize, outputSize, bufferStep, kernelSizeIn, ke
 end
 
 
-function StepConvLSTM:weightInit(method)
-  local method = method or nil
-  if not method then
-    method = 'xiva...?'
-  else
-    method = 'gaussian'
-  end
-  -- TODO:...
-  print('not implement: weightInit')
-end
-
 
 -- put them in self for convinence of debugging
 
@@ -313,12 +302,13 @@ function StepConvLSTM:typeChecking(para, msg)
 end
 
 function StepConvLSTM:unpackBuffer(x, bufferStepDim)
-  assert(x:dim() == 4)
+  assert(x:dim() == 4, 'size: '..x:size(1)..' '..x:size(2)..' '..x:size(3)..' '..x:size(4))
   local size = x:size(2)
-  
+  --print(bufferStepDim)  
   assert(size == self.inputSize or size == self.outputSize, 'dimention2 of variable not input/output size, get size:'..x:size(1)..', '..x:size(2)..', '..x:size(3)..', '..x:size(4))
   local bufferStepDim = bufferStepDim or self.bufferStep
-  x:resize(bufferStepDim, self.batchSize, size, self.height, self.width)
+
+  x = x:view(bufferStepDim, self.batchSize, size, self.height, self.width)
   return x
 end
 
@@ -326,7 +316,7 @@ function StepConvLSTM:packBuffer(x, bufferStepDim)
   assert(x:dim() == 5)
   local size = x:size(3)
   local bufferStepDim = bufferStepDim or self.bufferStep
-  x:resize(bufferStepDim * self.batchSize, size, self.height, self.width)
+  x = x:view(bufferStepDim * self.batchSize, size, self.height, self.width)
   return x
 end
 
@@ -334,10 +324,9 @@ function StepConvLSTM:updateOutput(input)
   -- local p, g = self.module:getParameters()
   -- assert(g:mean() == 0, 'gradient not zero at the begin'..g:mean())
   assert(torch.isTensor(input))
-  self:unpackBuffer(input)
-  --print(self.output:size())
-  self:unpackBuffer(self.output)
-  self:unpackBuffer(self.cells)
+  input = self:unpackBuffer(input)
+  self.output = self:unpackBuffer(self.output)
+  self.cells = self:unpackBuffer(self.cells)
 
   if(self.step > self.bufferStep) then
     self.step = 1
@@ -384,9 +373,10 @@ function StepConvLSTM:updateOutput(input)
   -- print('end StepConvLSTM')
   self.lastCell = self.cells[self.bufferStep]
   self.lastOutput = self.output[self.bufferStep]
-  self:packBuffer(input)
-  self:packBuffer(self.output)
-  self:packBuffer(self.cells)
+
+  input = self:packBuffer(input)
+  self.output = self:packBuffer(self.output)
+  self.cells = self:packBuffer(self.cells)
 
   -- note that we don't return the cell, just the output
   return self.output
@@ -437,14 +427,16 @@ function StepConvLSTM:maxBackWard(input, gradOutput, scale)
   assert(self.bufferStep~=1, 'maxiBp only apply for bufferStep ~= 1 StepConvLSTM')
 
   local maxiBpStep = gradOutput:size(1)/self.batchSize
+  --print('bufferStepDim: ', maxiBpStep)
+
   assert(self.bufferStep - maxiBpStep > 1, 'maxiBp should at least 2 step smaller than the bufferStep')
   -- print('maxi bp step is', maxiBpStep)
   local scale = scale or 1
-  self:unpackBuffer(gradOutput, maxiBpStep)
-  self:unpackBuffer(input)
-  self:unpackBuffer(self.gradInput)
-  self:unpackBuffer(self.cells)
-  self:unpackBuffer(self.output)
+  gradOutput = self:unpackBuffer(gradOutput, maxiBpStep)
+  input = self:unpackBuffer(input)
+  self.gradInput = self:unpackBuffer(self.gradInput)
+  self.cells = self:unpackBuffer(self.cells)
+  self.output = self:unpackBuffer(self.output)
 
   assert(gradOutput:dim() == 5, 'gradOutput dimension = 5 required')
   assert(input:dim() == 5, 'input dimension = 5 required')
@@ -466,21 +458,22 @@ function StepConvLSTM:maxBackWard(input, gradOutput, scale)
   -- self.lastGradInput = self.gradInput[1]
   -- self.lastGradPrevOutput = gradPrevOutput
 
-  self:packBuffer(input)
-  self:packBuffer(gradOutput)
-  self:packBuffer(self.gradInput, maxiBpStep)
-  self:packBuffer(self.cells)
-  self:packBuffer(self.output)
+  input = self:packBuffer(input)
+  gradOutput = self:packBuffer(gradOutput, maxiBpStep)
+  self.gradInput = self:packBuffer(self.gradInput)
+  self.cells = self:packBuffer(self.cells)
+  self.output = self:packBuffer(self.output)
+  -- print('maxiBp done')
   return self.gradInput  -- 5d
 end
 
 function StepConvLSTM:backward(input, gradOutput, scale)
   local scale = scale or 1
-  self:unpackBuffer(gradOutput)
-  self:unpackBuffer(input)
-  self:unpackBuffer(self.gradInput)
-  self:unpackBuffer(self.cells)
-  self:unpackBuffer(self.output)
+  gradOutput = self:unpackBuffer(gradOutput)
+  input = self:unpackBuffer(input)
+  self.gradInput = self:unpackBuffer(self.gradInput)
+  self.cells = self:unpackBuffer(self.cells)
+  self.output = self:unpackBuffer(self.output)
 
   assert(gradOutput:dim() == 5, 'gradOutput dimension = 5 required')
   assert(input:dim() == 5, 'input dimension = 5 required')
@@ -508,11 +501,11 @@ function StepConvLSTM:backward(input, gradOutput, scale)
   self.lastGradInput = self.gradInput[1]
   self.lastGradPrevOutput = gradPrevOutput
 
-  self:packBuffer(input)
-  self:packBuffer(gradOutput)
-  self:packBuffer(self.gradInput)
-  self:packBuffer(self.cells)
-  self:packBuffer(self.output)
+  input = self:packBuffer(input)
+  gradOutput = self:packBuffer(gradOutput)
+  self.gradInput = self:packBuffer(self.gradInput)
+  self.cells = self:packBuffer(self.cells)
+  self.output = self:packBuffer(self.output)
   return self.gradInput  -- 5d
 end
 
