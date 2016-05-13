@@ -240,7 +240,7 @@ function getdataTensor_hko(mode, data_path)
    local seqHeads = torch.Tensor(nsamples)
 
 
-   if mode == 'train--' then
+   if mode == 'train' then
       print('training mode, shffule heads')
       shuffleID = torch.randperm(nsamples) 
       -- range from 1 to numOfBatches, for shuffle purpose

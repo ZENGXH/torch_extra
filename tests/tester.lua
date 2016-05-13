@@ -567,7 +567,7 @@ function runtest.hkotraning()
 			predictor_conv3:updateParameters(lr)
 			encoder_predictor:updateParameters(lr)
 
-			weightVis(encoder_predictor, 'encoder_predictor_weight', t)
+			-- weightVis(encoder_predictor, 'encoder_predictor_weight', t)
 
 		    mytester:assertTensorEq(predictor_conv2.initCell, encoder_lstm0.lastCell, 0.0001)
 
@@ -587,7 +587,7 @@ function runtest.hkotraning()
 		    	saveImageDepth(predictor_conv2_grad_output,'dep_conv2_grad_output', t)
 		    	saveImageSequence(predictor_conv3_grad_output,'seq_conv3_grad_output', t)
 		    	saveImageDepth(predictor_conv3_grad_output,'dep_conv3_grad_output', t)
-
+		    	saveImageSequence(input_encoder_predictor, 'dep_input_encoder_predictor', t)
 		    	saveImageSequence(predictor_conv3.output,'seq_output_conv3', t)
 		    	saveImageSequence(predictor_conv2.output,'seq_output_conv2', t)
 		    	saveImageSequence(encoder_lstm0.output,'seq_output_lstm0', t)
@@ -608,8 +608,7 @@ function runtest.hkotraning()
 		    	saveImageDepth(encoder_lstm0.cells,'dep_cells_lstm0', t)
 		    	saveImageDepth(encoder_lstm1.cells,'dep_cells_lstm1', t)
 		    	
-		    	saveImage(predictor_conv3.cells, 'predictor_conv3_cell', t, nil,nil,nil,true)
-
+		    
 		    	saveImage(unpackBuffer(prediction), 'output', t)
 		    	saveImage(unpackBuffer(target_predictor), 'target', t)
 
