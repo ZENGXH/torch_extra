@@ -95,7 +95,7 @@ require 'optim'
 -- torch.setdefaulttensortype('torch.FloatTensor')
 local StepConvLSTM, parent = torch.class('nn.StepConvLSTM', 'nn.Container')
 
-function StepConvLSTM:__init(inputSize, outputSize, bufferStep, kernelSizeIn, kernelSizeMem, stride, batchSize, height, width, defaultType)
+function StepConvLSTM:__init(inputSize, outputSize, bufferStep, kernelSizeIn, kernelSizeMem, stride, batchSize, height, width, defaultType, stateConfig)
     -- print(inputSize, outputSize, bufferStep, kernelSizeIn, kernelSizeMem, stride, batchSize, height, width, defaultType)
     assert(defaultType, 'defaultType required')
     assert(batchSize, 'input are required in batchMode')    -- to reduce the complexity
@@ -143,12 +143,17 @@ function StepConvLSTM:__init(inputSize, outputSize, bufferStep, kernelSizeIn, ke
     -- print('self output init: ', self.output:size())
     self.gradInput = torch.Tensor(self.bufferStep * self.batchSize, self.inputSize, self.height,self.width):fill(0)
     self.cells = torch.Tensor(self.bufferStep * self.batchSize, self.outputSize, self.height, self.width):fill(0)
+    self.stateConfig = stateConfig or 0
+    -- 1: pass state out, gradPrevCell from other
+    -- 2: pass state in, prevCell and precOutput from other
+    -- 3: 1 + 2
+    -- 0: nothing
 
     --print('configure StepConvLSTM:')
     --print('inputSize, outputSize, bufferStep, kernelSizeIn, kernelSizeMem, stride, batchSize, height, width')
     --print(self.inputSize, self.outputSize, self.bufferStep, self.kernelSizeIn, self.kernelSizeMem, self.stride, self.batchSize, self.height, self.width)
-
-    self:forget()
+    self.debugBuffer = torch.Tensor()
+    
 
 end
 
@@ -249,7 +254,7 @@ function StepConvLSTM:nngraphModel(i2g, o2g)
   local h2h = o2g(prev_h):annotate{name='h2h'}
 
   local all_input_sums = nn.CAddTable()({i2h, h2h})
-  local reshaped = nn.Reshape(4, self.batchSize, self.outputSize, self.height, self.width)(all_input_sums)
+  local reshaped = nn.View(4, self.batchSize, self.outputSize, self.height, self.width)(all_input_sums)
 
   -- local reshaped = nn.Reshape(4 * self.inputSize, self.outputSize, self.height, self.width)(all_input_sums)
   -- input, hidden, forget, output
@@ -257,13 +262,26 @@ function StepConvLSTM:nngraphModel(i2g, o2g)
   local in_gate = nn.Sigmoid()(n1)
   local in_transform = nn.Tanh()(n2)
   local forget_gate = nn.Sigmoid()(n3)
-  local out_gate = nn.Sigmoid()(n4)
 
   -- perform the LSTM update
   local next_c           = nn.CAddTable()({
    nn.CMulTable()({forget_gate, prev_c}),
    nn.CMulTable()({in_gate,     in_transform})
   })
+  local active_c = nn.SpatialConvolution(self.outputSize, self.outputSize, 
+                                  self.kernelSizeMem, self.kernelSizeMem, 
+                                  self.stride, self.stride, 
+                                  self.padMem, self.padMem)
+
+  w_init(active_c)
+  active_c = active_c(next_c)
+  local inactive_out_gate = nn.CAddTable()({active_c, n4})
+  local out_gate = nn.Sigmoid()(inactive_out_gate)
+
+
+
+
+
   -- gated cells form the output
   local next_h = nn.CMulTable()({out_gate, nn.Tanh()(next_c)})
 
@@ -285,7 +303,7 @@ pass the parameters to previous layer:
   for LSTM 1, input is: tensor x,
   for self.module, input is {x, prevOutput, prevCell} 
 
---]]
+
 function StepConvLSTM:typeChecking(para, msg)
   if torch.type(para) == 'table' then
     self.typeChecking(para[1], msg)
@@ -300,7 +318,7 @@ function StepConvLSTM:typeChecking(para, msg)
     assert(para._type == defaulType)
   end
 end
-
+--]]
 function StepConvLSTM:unpackBuffer(x, bufferStepDim)
   assert(x:dim() == 4, 'size: '..x:size(1)..' '..x:size(2)..' '..x:size(3)..' '..x:size(4))
   local size = x:size(2)
@@ -327,6 +345,13 @@ function StepConvLSTM:updateOutput(input)
   input = self:unpackBuffer(input)
   self.output = self:unpackBuffer(self.output)
   self.cells = self:unpackBuffer(self.cells)
+  self.cells:fill(0)
+  self.output:fill(0)
+  self.gradPrevCell:fill(0)
+  if self.stateConfig ~= 2 then
+    self.initCell:fill(0)
+    self.initOutput:fill(0)
+  end
 
   if(self.step > self.bufferStep) then
     self.step = 1
@@ -341,7 +366,8 @@ function StepConvLSTM:updateOutput(input)
   assert(input:size(5) == self.width) 
 
   local outputTable = {}
-
+--self.debugBuffer = torch.Tensor()
+--   if opt.onMac:resizeAs(self.output)
   for idStep = 1, self.bufferStep do
     -- print('StepConvLSTM sequencing step: ', idStep)
     assert(self.output:type() == input:type(), 'fail self.output:type() == input:type()')
@@ -366,6 +392,7 @@ function StepConvLSTM:updateOutput(input)
     end
     --print('outputTable', outputTable)
     --print({self.output, self.cells})
+   -- self.debugBuffer[idStep] = outputTable[1]
     self.output[idStep] = outputTable[1]
     self.cells[idStep] = outputTable[2]
     self.step = self.step + 1
@@ -382,18 +409,16 @@ function StepConvLSTM:updateOutput(input)
   return self.output
 end
 
--- forget from empty state
+--[[ forget from empty state
 function StepConvLSTM:forget()
   -- print('calling forget')
   self.step = 1
-
   self.initCell = torch.Tensor(self.batchSize, self.outputSize, self.height, self.width):fill(0)
   self.initOutput = torch.Tensor(self.batchSize, self.outputSize, self.height, self.width):fill(0)
   self.output = torch.Tensor(self.bufferStep * self.batchSize, self.outputSize, self.height, self.width):fill(0)
   self.gradInput = torch.Tensor(self.bufferStep * self.batchSize, self.inputSize, self.height,self.width):fill(0)
   self.cells = torch.Tensor(self.bufferStep * self.batchSize, self.outputSize, self.height, self.width):fill(0)
-
-end
+end]]--
 
 function StepConvLSTM:getDimensionForGradInput(input)
 -- if input dimension = 4, gradInput has the same size
@@ -468,6 +493,9 @@ function StepConvLSTM:maxBackWard(input, gradOutput, scale)
 end
 
 function StepConvLSTM:backward(input, gradOutput, scale)
+  if self.stateConfig ~= 1 then
+    self.gradPrevCell:fill(0)
+  end
   local scale = scale or 1
   gradOutput = self:unpackBuffer(gradOutput)
   input = self:unpackBuffer(input)
@@ -578,7 +606,7 @@ function StepConvLSTM:accGradParameters(input, gradOutput, lr)
   return 
 end
 
--- ===============================================================
+--[[===============================================================
 function StepConvLSTM:initBias(forgetBias, otherBias)
   local fBias = forgetBias or 1
   local oBias = otherBias or 0
@@ -587,7 +615,7 @@ function StepConvLSTM:initBias(forgetBias, otherBias)
   self.cellGate.modules[2].modules[1].bias:fill(oBias)
   self.forgetGate.modules[2].modules[1].bias:fill(fBias)
 end
-
+]]--
 
 function StepConvLSTM:zeroGradParameters()
   self.module:zeroGradParameters()
