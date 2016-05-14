@@ -83,10 +83,14 @@ function saveImage(figure_in, name, iter,epochSaveDir, type, numsOfOut, pack)
 	    	if img:size(2) ~= 3 then
 		    	img = img:narrow(1, 1, 1)
 		    end
-		    --if name == 'output' then
-		    --	print(img:mean())
-		    -- end
-	    	img = img/img:max()
+		    --if name == 'output'  then
+		    --	img = img:mul(255)
+	    	img:div(img:max())
+
+		    --else
+		    --	img:add(-img:min()):div(img:max() - img:min())
+			--end
+
 --   	if name == 'flow' then
 --    		  print('1: mean flow: %.4f flow range: u = %.3f .. %.3f', img[1]:mean(), img[1]:min(), img[1]:max())
 --    		  print('2: mean flow: %.4f flow range: u = %.3f .. %.3f', img[2]:mean(), img[2]:min(), img[2]:max())
@@ -98,8 +102,8 @@ function saveImage(figure_in, name, iter,epochSaveDir, type, numsOfOut, pack)
 		elseif dim == 2 then
 			-- print('save!!!!')
 	    	local img = figure_in:clone()
-	    	img = img/img:max()
-
+	    	img:div(img:max())
+		    --	img:add(-img:min()):div(img:max() - img:min())
 		    image.save(epochSaveDir..'iter-'..tostring(iter)..'-'..name..'-n'..tostring(numsOfOut)..'.png',  img)
 		elseif dim == 4 then -- batch, input/outputSize, h, w
 			-- print('save 4')
@@ -204,12 +208,18 @@ function w_init_kaiming(fan_in, fan_out)
    return math.sqrt(4/(fan_in + fan_out))
 end
 
-function w_init(m)
-	print('weight init: xavier')
-    m:reset(w_init_xavier(m.nInputPlane*m.kH*m.kW, m.nOutputPlane*m.kH*m.kW))
+
+
+function w_init(m, div)
+	local div = div or 1
+	print('weight init: xavier', m.nInputPlane*m.kH*m.kW, m.nOutputPlane*m.kH*m.kW/div)
+	local parameters, g = m:getParameters()
+	local assertp = parameters:clone()
+    m:reset(w_init_xavier_caffe(m.nInputPlane*m.kH*m.kW, m.nOutputPlane*m.kH*m.kW/div))
     if m.bias then
     	m.bias:zero()
     end
+    assert(parameters:add(-assertp):mean() ~= 0)
 end
 
 
@@ -248,6 +258,22 @@ function weightVis(net, name, t)
                            nrow=math.floor(math.sqrt(net.nInputPlane*net.nOutputPlane)),
                            symmetric=true}
                            print('weight mean of '..name, weight:mean())
-    print('dsize', dd:size())
+    -- print('dsize', dd:size())
+    saveImage(dd, name, t)
+end
+
+function saveImageAll(x, name, t)
+	assert(x:dim() == 4)
+	x = makeContiguous(x)
+	local row = x:size(1)
+	x = x:view(x:size(1), x:size(3)*x:size(2), x:size(4))
+    local dd = image.toDisplayTensor{input=x,
+                           padding=0,
+                           min=0,
+                           max=1,
+                           nrow= x:size(1),
+                           symmetric=false}
+    -- print('weight mean of '..name, weight:mean())
+    -- print('dsize', dd:size())
     saveImage(dd, name, t)
 end

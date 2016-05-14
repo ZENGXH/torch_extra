@@ -153,7 +153,10 @@ function StepConvLSTM:__init(inputSize, outputSize, bufferStep, kernelSizeIn, ke
     --print('inputSize, outputSize, bufferStep, kernelSizeIn, kernelSizeMem, stride, batchSize, height, width')
     --print(self.inputSize, self.outputSize, self.bufferStep, self.kernelSizeIn, self.kernelSizeMem, self.stride, self.batchSize, self.height, self.width)
     self.debugBuffer = torch.Tensor()
-    
+    print('configure StepConvLSTM:')
+    print('inputSize, outputSize, bufferStep, kernelSizeIn, kernelSizeMem, stride, batchSize, height, width')
+    print(self.inputSize, self.outputSize, self.bufferStep, self.kernelSizeIn, self.kernelSizeMem, self.stride, self.batchSize, self.height, self.width)
+
 
 end
 
@@ -172,8 +175,8 @@ function StepConvLSTM:buildModel()
                                   self.kernelSizeMem, self.kernelSizeMem, 
                                   self.stride, self.stride, 
                                   self.padMem, self.padMem)
-    w_init(i2g)
-    w_init(o2g)
+    w_init(i2g, 4)
+    w_init(o2g, 4)
    if self.usenngraph then
       print('usting nngraph')
       return self:nngraphModel(i2g, o2g)
@@ -259,23 +262,37 @@ function StepConvLSTM:nngraphModel(i2g, o2g)
   -- local reshaped = nn.Reshape(4 * self.inputSize, self.outputSize, self.height, self.width)(all_input_sums)
   -- input, hidden, forget, output
   local n1, n2, n3, n4 = nn.SplitTable(1)(reshaped):split(4)
-  local in_gate = nn.Sigmoid()(n1)
+
+  local inputLast_c = nn.SpatialConvolution(self.outputSize, 2*self.outputSize, 
+                                  self.kernelSizeMem, self.kernelSizeMem, 
+                                  self.stride, self.stride, 
+                                  self.padMem, self.padMem)
+
+  w_init(inputLast_c, 2)
+  inputLast_c = inputLast_c(prev_c)
+  local prevc1, prevc2 = nn.SplitTable(1)(
+    nn.View(2, self.batchSize, self.outputSize, self.height, self.width)(inputLast_c)
+    ):split(2)
+
+  local in_gate = nn.Sigmoid()(nn.CAddTable()({prevc1, n1}))
+
   local in_transform = nn.Tanh()(n2)
-  local forget_gate = nn.Sigmoid()(n3)
+  local forget_gate = nn.Sigmoid()(nn.CAddTable()({prevc2, n3}))
 
   -- perform the LSTM update
   local next_c           = nn.CAddTable()({
    nn.CMulTable()({forget_gate, prev_c}),
    nn.CMulTable()({in_gate,     in_transform})
   })
+
   local active_c = nn.SpatialConvolution(self.outputSize, self.outputSize, 
                                   self.kernelSizeMem, self.kernelSizeMem, 
                                   self.stride, self.stride, 
                                   self.padMem, self.padMem)
 
   w_init(active_c)
-  active_c = active_c(next_c)
-  local inactive_out_gate = nn.CAddTable()({active_c, n4})
+  -- active_c = active_c(next_c)
+  local inactive_out_gate = nn.CAddTable()({active_c(next_c), n4})
   local out_gate = nn.Sigmoid()(inactive_out_gate)
 
 
@@ -606,7 +623,7 @@ function StepConvLSTM:accGradParameters(input, gradOutput, lr)
   return 
 end
 
---[[===============================================================
+--[[
 function StepConvLSTM:initBias(forgetBias, otherBias)
   local fBias = forgetBias or 1
   local oBias = otherBias or 0
