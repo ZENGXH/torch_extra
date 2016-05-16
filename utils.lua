@@ -18,7 +18,7 @@ function typeChecking(x, defaultType)
 	end
 end	
 
-function saveImageDepth(figure_in, name, iter)
+function saveImageDepth(figure_in, name, iter, epochSaveDir)
 
 	-- local length = figure_in:size(1)/opt.batchSize
 	-- ori: bufferSize*batchSize, depth, h, w
@@ -30,7 +30,7 @@ function saveImageDepth(figure_in, name, iter)
 	assert(figure_in:size(2) == figure_in:size(3))
 
 	figure_in = figure_in:view(figure_in:size(1) * figure_in:size(2), figure_in:size(3))
-	saveImage(figure_in, name, iter)
+	saveImage(figure_in, name, iter, epochSaveDir)
 end
 
 function makeContiguous(figure_in)
@@ -47,7 +47,7 @@ function makeContiguous(figure_in)
 end
 
 
-function saveImageSequence(figure_in, name, iter)
+function saveImageSequence(figure_in, name, iter, epochSaveDir)
 	assert(figure_in:dim() == 4, 'figure_in dim'..figure_in:dim()..name)
 
 	-- assert(figure_in:size(2) == opt.batchSize)
@@ -58,7 +58,7 @@ function saveImageSequence(figure_in, name, iter)
 	assert(figure_in:size(2) == figure_in:size(3))
 	
 	figure_in = figure_in:view(figure_in:size(1) * figure_in:size(2), figure_in:size(3))
-	saveImage(figure_in, name, iter)
+	saveImage(figure_in, name, iter, epochSaveDir)
 end
 
 function saveImage(figure_in, name, iter,epochSaveDir, type, numsOfOut, pack)
@@ -85,10 +85,10 @@ function saveImage(figure_in, name, iter,epochSaveDir, type, numsOfOut, pack)
 		    end
 		    --if name == 'output'  then
 		    --	img = img:mul(255)
-	    	img:div(img:max())
+	    	-- img:div(img:max())
 
 		    --else
-		    --	img:add(-img:min()):div(img:max() - img:min())
+		    img:add(-img:min()):div(img:max() - img:min())
 			--end
 
 --   	if name == 'flow' then
@@ -102,8 +102,8 @@ function saveImage(figure_in, name, iter,epochSaveDir, type, numsOfOut, pack)
 		elseif dim == 2 then
 			-- print('save!!!!')
 	    	local img = figure_in:clone()
-	    	img:div(img:max())
-		    --	img:add(-img:min()):div(img:max() - img:min())
+	    	-- img:div(img:max())
+		    img:add(-img:min()):div(img:max() - img:min())
 		    image.save(epochSaveDir..'iter-'..tostring(iter)..'-'..name..'-n'..tostring(numsOfOut)..'.png',  img)
 		elseif dim == 4 then -- batch, input/outputSize, h, w
 			-- print('save 4')
@@ -210,12 +210,18 @@ end
 
 
 
-function w_init(m, div)
+function w_init(m, div, stdset)
 	local div = div or 1
-	print('weight init: xavier', m.nInputPlane*m.kH*m.kW, m.nOutputPlane*m.kH*m.kW/div)
 	local parameters, g = m:getParameters()
 	local assertp = parameters:clone()
-    m:reset(w_init_xavier_caffe(m.nInputPlane*m.kH*m.kW, m.nOutputPlane*m.kH*m.kW/div))
+	local std = w_init_xavier(m.nInputPlane*m.kH*m.kW, m.nOutputPlane*m.kH*m.kW/div)
+	--local std = torch.Tensor(1):fill(std):normal(0, 0.01)[1]
+	print('weight init: xavier std: ',std, m.nInputPlane*m.kH*m.kW, m.nOutputPlane*m.kH*m.kW/div)
+
+	m:reset(std)
+
+    assert(m.weight)
+    -- m.weight = m.weight:uniform(-0.008, 0.008)
     if m.bias then
     	m.bias:zero()
     end
@@ -262,7 +268,7 @@ function weightVis(net, name, t)
     saveImage(dd, name, t)
 end
 
-function saveImageAll(x, name, t)
+function saveImageAll(x, name, t, epochSaveDir)
 	assert(x:dim() == 4)
 	x = makeContiguous(x)
 	local row = x:size(1)
@@ -275,5 +281,47 @@ function saveImageAll(x, name, t)
                            symmetric=false}
     -- print('weight mean of '..name, weight:mean())
     -- print('dsize', dd:size())
-    saveImage(dd, name, t)
+    saveImage(dd, name, t, epochSaveDir)
 end
+
+function reshape_patch(img, patchSize)
+	local patchSize = patchSize or 2
+	assert(img:dim() == 4, 'reshape_patch require image in size: batchSize, depth, h, w')
+	-- i2 = img
+	img = img:reshape(img:size(1), -- B
+					img:size(2),   -- D
+					img:size(3)/patchSize, -- H/P
+					patchSize, 		-- P
+					img:size(4)/patchSize, -- W/P
+					patchSize)
+			:permute(1, 2, 4, 6, 3, 5)
+			:reshape(img:size(1), img:size(2) * patchSize * patchSize, img:size(3)/patchSize, img:size(4)/patchSize)
+	--[[ network version:
+	img = nn.View(batchSize, inputSize, 512/patchSize, patchSize, 512/patchSize, patchSize):forward(img)
+	img = nn.Transpose({5,6}, {4,3}, {4,5}):forward(img) -- 2, 4, 256, 256
+	img = nn.View(batchSize, inputSize * patchSize * patchSize, 512/patchSize, 512/patchSize):forward(img)
+	]]--
+	return img
+end
+
+function reshape_patch_back(img, patchSize)
+	assert(img:dim() == 4, 'reshape_patch require image in size: batchSize, D*P*P, h/P, w/P')
+
+	-- input in size: batchSize(B), inputSize(D) * patchSize(P) * patchSize, height/patchSize, width/patchSize
+   img = img:reshape(img:size(1), -- B
+					(img:size(2)/patchSize)/patchSize,  -- D
+					patchSize, 	  -- P
+					patchSize, 	  -- P
+					img:size(3),  -- H/P
+					img:size(4)	  -- W/P
+					) -- now B, D, P, P, H/P, W/P 
+   			:permute(1, 2, 5, 3, 6, 4) -- B, D, H/P, P, W/P, P
+   			:reshape(img:size(1), -- B
+					(img:size(2)/patchSize)/patchSize, -- D
+					img:size(3) * patchSize,  -- H
+					img:size(4) * patchSize	-- W
+					)
+ 	return img
+ end
+
+

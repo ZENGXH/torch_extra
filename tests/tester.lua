@@ -1,8 +1,11 @@
 
 -- --prepareModeldir_Imagedir('test_StepConvLSTM')
+require 'torch'
 dofile '../../hko/opts-hko.lua'
 require 'nn'
 require 'math'
+require 'image'
+
 dofile '../RecursiveSequential.lua'
 dofile '../StepConvLSTM.lua'
 dofile '../dataProvider.lua'
@@ -34,13 +37,13 @@ function runtest2.hkotraning_inputPredictor()
 
 	-- validDataProvider = getdataSeq_hko('valid', data_path)
 		encoder_lstm0 = nn.StepConvLSTM(opt.nFiltersMemory[1], opt.nFiltersMemory[2],  -- 5, 15?
-		                 		opt.input_nSeq - 1, opt.kernelSize,
+		                 		opt.input_nSeq, opt.kernelSize,
 		                        opt.kernelSizeMemory, opt.stride, 
 		                        opt.batchSize, opt.inputSizeW, opt.inputSizeH, defaultType, 1) -- without nngraph
 
 		encoder_lstm1 = nn.StepConvLSTM(opt.nFiltersMemory[2], opt.nFiltersMemory[2],  -- 5, 15?
-		                 		opt.input_nSeq - 1, opt.kernelSize,
-		                        opt.kernelSizeMemory, opt.stride, 
+		                 		opt.input_nSeq, opt.kernelSize,
+		                        opt.kernelSizeMemory, opt.stride*2, 
 		                        opt.batchSize, opt.inputSizeW, opt.inputSizeH, defaultType, 1) -- without nngraph
 		
 		bufferSize = opt.output_nSeq
@@ -51,7 +54,7 @@ function runtest2.hkotraning_inputPredictor()
 	    -- predictor_conv3 and 2, output depth should be the same as encoder_lstm!
 	    predictor_conv3 = nn.StepConvLSTM(opt.nFiltersMemory[2], opt.nFiltersMemory[2],  -- 5, 15?
 		                 		bufferSize, opt.kernelSize,
-		                        opt.kernelSizeMemory, opt.stride, opt.batchSize, 
+		                        opt.kernelSizeMemory, opt.stride*2, opt.batchSize, 
 		                        opt.inputSizeW, opt.inputSizeH, defaultType, 2) -- without nngraph
 
 
@@ -146,7 +149,7 @@ function runtest2.hkotraning_inputPredictor()
 		    print('encoder_predictor weight: ', p:mean())
 
 		    -- input_encoder = trainData[1]
-		    input_encoder = trainData[1]:narrow(1, 1, opt.input_nSeq - 1) -- dimension1, from index 1, size = input_nSeq - 1
+		    input_encoder = trainData[1] -- :narrow(1, 1, opt.input_nSeq - 1) -- dimension1, from index 1, size = input_nSeq - 1
 		    -- input_encoder:resize((opt.input_nSeq - 1)*opt.batchSize, opt.nFiltersMemory[1], opt.inputSizeH, opt.inputSizeW)
 		    input_encoder = packBuffer(input_encoder)
 		    mytester:assert(input_encoder:dim() == 4)
@@ -155,7 +158,7 @@ function runtest2.hkotraning_inputPredictor()
 		    target_predictor = trainData[2]
 		    -- print('target size', target_predictor:size())
 		    input_predictor = torch.Tensor(bufferSize, opt.batchSize, opt.nFiltersMemory[1], opt.inputSizeH, opt.inputSizeW):fill(0)
-		    input_predictor[1] = trainData[1]:narrow(1, opt.input_nSeq, 1) 
+		    -- input_predictor[1] = trainData[1]:narrow(1, opt.input_nSeq, 1) 
 		    input_predictor = packBuffer(input_predictor)
 
 		    input_encoder_predictor = torch.Tensor(opt.output_nSeq, opt.batchSize, opt.nFiltersMemory[2]*2, opt.inputSizeH, opt.inputSizeW)
@@ -1195,7 +1198,7 @@ function runtest2.hkotraning_ori()
 		    	saveImageAll(unpackBuffer(predictor_conv3_grad_output):select(2,1), 'all_conv3_grad_output', t, epochSaveDir)
 
 		    	saveImageAll(unpackBuffer(target_predictor):select(2,1), 'all_target', t, epochSaveDir)
---[[
+				--[[
 		    	saveImageSequence(predictor_conv3.output,'seq_output_conv3', t, epochSaveDir)
 		    	saveImageSequence(predictor_conv2.output,'seq_output_conv2', t, epochSaveDir)
 		    	saveImageSequence(encoder_lstm0.output,'seq_output_lstm0', t, epochSaveDir)
@@ -1205,12 +1208,12 @@ function runtest2.hkotraning_ori()
 		    	saveImageDepth(predictor_conv2.output,'dep_output_conv2', t, epochSaveDir)
 		    	saveImageDepth(encoder_lstm0.output,'dep_output_lstm0', t, epochSaveDir)
 		    	saveImageDepth(encoder_lstm1.output,'dep_output_lstm1', t, epochSaveDir)
-]]--
+				]]--
 		    	saveImageAll(unpackBuffer(predictor_conv3.cells):select(2,1), 'all_cells_conv3', t, epochSaveDir)
 		    	saveImageAll(unpackBuffer(predictor_conv2.cells):select(2,1), 'all_cells_conv2', t, epochSaveDir)
 		    	saveImageAll(unpackBuffer(encoder_lstm0.cells):select(2,1), 'all_cells_lstm0', t, epochSaveDir)
 		    	saveImageAll(unpackBuffer(encoder_lstm1.cells):select(2,1), 'all_cells_lstm1', t, epochSaveDir)
---[[
+				--[[
 		    	saveImageSequence(predictor_conv3.cells,'seq_cells_conv3', t, epochSaveDir)
 		    	saveImageSequence(predictor_conv2.cells,'seq_cells_conv2', t, epochSaveDir)
 		    	saveImageSequence(encoder_lstm0.cells,'seq_cells_lstm0', t, epochSaveDir)
@@ -1220,7 +1223,7 @@ function runtest2.hkotraning_ori()
 		    	saveImageDepth(predictor_conv2.cells,'dep_cells_conv2', t, epochSaveDir)
 		    	saveImageDepth(encoder_lstm0.cells,'dep_cells_lstm0', t, epochSaveDir)
 		    	saveImageDepth(encoder_lstm1.cells,'dep_cells_lstm1', t, epochSaveDir)
-	]]--	    
+				]]--	    
 			    saveImage(unpackBuffer(prediction), 'output', t, epochSaveDir)
 
 		    	saveImage(unpackBuffer(prediction:add(-prediction:min()):div(prediction:max() - prediction:min())), 'output', t, epochSaveDir)
@@ -1351,6 +1354,9 @@ function runtest.HadamardMul()
 	local h = 2
 	local w = 2
 	local net = nn.HadamardMul(inputSize)
+
+	-- by default, net weight = 0
+	net.weight:normal(0.1, 0.1)
 	local input = torch.randn(batchSize * inputSize * h * w):resize(batchSize, inputSize, h, w)
 	local output = net:forward(input)
 	mytester:assertTensorNe(output, input)
@@ -1362,9 +1368,10 @@ function runtest.HadamardMul()
 	local p, g = net:getParameters()
 	mytester:assert(g:sum() == 0, 'zeroGradParameters fail')
 
+
 	net:backward(input, output, 1000)
-	print('input', input)
-	print('output', output)
+	-- print('input', input)
+	-- print('output', output)
 	mytester:assertTensorNe(output, input, 'forward get output fail')
 
 	mytester:assert(g:sum() ~= 0, 'backward update gradParameters fail')
@@ -1373,7 +1380,7 @@ function runtest.HadamardMul()
 	net:updateParameters(10)
 	local p, g = net:getParameters()
 
-	print(p:mean())
+	-- print(p:mean())
 	mytester:assertTensorNe(p, original_w, 'updateParameters fail')
 
 	-- forward test2
@@ -1384,6 +1391,39 @@ function runtest.HadamardMul()
 	net:backward(input, output:zero()) -- input == output, gradent = 0	
 	mytester:assert(g:sum() == 0, 'calculate gradParameters incorrectly')
 end
+
+
+function runtest.reshapeImage()
+	local i = image.lena()
+	i = image.rgb2y(i)
+	local batchSize = 3
+	local inputSize = 2
+	local patchSize = 4
+	ii = torch.Tensor(inputSize, 512, 512)
+	ii[1] = i
+	ii[2] = i
+
+	i2 = torch.Tensor(batchSize, inputSize, 512, 512)
+	i2[1] = ii
+	i2[2] = ii
+	i2[3] = ii
+	-- i2 = ii
+	i2_1 = reshape_patch(i2, patchSize)
+	--	i2 = nn.Transpose({1,2}, {2,3}, {3,4}):forward(i2) -- 1, 512, 512,2
+	--[[
+	i2 = nn.View(batchSize, inputSize, 512/patchSize, patchSize, 512/patchSize, patchSize):forward(i2)
+	i2 = nn.Transpose({5,6}, {4,3}, {4,5}):forward(i2) -- 2, 4, 256, 256
+	i2 = nn.View(batchSize, inputSize * patchSize * patchSize, 512/patchSize, 512/patchSize):forward(i2)
+	]]--
+
+	i2_dis = i2_1[1][1]
+	print('i2:size()', i2_dis:size())
+	image.save('test.png', i2_dis)
+
+	i2_2 = reshape_patch_back(i2_1, patchSize)
+	mytester:assertTensorEq(i2_2, i2, 'reshape_patch_back fail')
+end
+
 
 
 mytester = torch.Tester()
