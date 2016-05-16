@@ -6,7 +6,7 @@ require 'math'
 dofile '../RecursiveSequential.lua'
 dofile '../StepConvLSTM.lua'
 dofile '../dataProvider.lua'
-
+dofile '../HadamardMul.lua'
 dofile '../utils.lua'
 if not opt.onMac then
 	require 'cunn'
@@ -16,12 +16,11 @@ end
 defaultType = 'nn.DoubleTensor'
 runtest = {}
 runtest2 = {}
------------------------------------
-function runtest2.hkotraning_recur()
-	if not opt.onMac then
-		require 'cunn'
-		require 'cutorch'
-	end
+torch.manualSeed(999)
+	local epochSaveDir = './data/'..curtime..'tempinit_copy/'
+------------------------------
+function runtest2.hkotraning_inputPredictor()
+
 	local gpuid = selectFreeGpu()
 	local data_path
 	if not opt.onMac then
@@ -31,31 +30,32 @@ function runtest2.hkotraning_recur()
 	end
 	nn.StepConvLSTM.usenngraph = true
 	trainDataProvider = getdataTensor_hko('train', data_path)
-	assert(trainDataProvider[10000000])
+	assert(trainDataProvider[1162])
+
 	-- validDataProvider = getdataSeq_hko('valid', data_path)
 		encoder_lstm0 = nn.StepConvLSTM(opt.nFiltersMemory[1], opt.nFiltersMemory[2],  -- 5, 15?
-		                 		opt.input_nSeq , opt.kernelSize,
+		                 		opt.input_nSeq - 1, opt.kernelSize,
 		                        opt.kernelSizeMemory, opt.stride, 
-		                        opt.batchSize, opt.inputSizeW, opt.inputSizeH, defaultType) -- without nngraph
+		                        opt.batchSize, opt.inputSizeW, opt.inputSizeH, defaultType, 1) -- without nngraph
 
 		encoder_lstm1 = nn.StepConvLSTM(opt.nFiltersMemory[2], opt.nFiltersMemory[2],  -- 5, 15?
-		                 		opt.input_nSeq , opt.kernelSize,
+		                 		opt.input_nSeq - 1, opt.kernelSize,
 		                        opt.kernelSizeMemory, opt.stride, 
-		                        opt.batchSize, opt.inputSizeW, opt.inputSizeH, defaultType) -- without nngraph
+		                        opt.batchSize, opt.inputSizeW, opt.inputSizeH, defaultType, 1) -- without nngraph
 		
-		local bufferSize = 1
+		bufferSize = opt.output_nSeq
 	    predictor_conv2 = nn.StepConvLSTM(opt.nFiltersMemory[1], opt.nFiltersMemory[2],  -- 5, 15?
 		                 		bufferSize, opt.kernelSize,
 		                        opt.kernelSizeMemory, opt.stride, opt.batchSize, 
-		                        opt.inputSizeW, opt.inputSizeH, defaultType) -- without nngraph
+		                        opt.inputSizeW, opt.inputSizeH, defaultType, 2) -- without nngraph
 	    -- predictor_conv3 and 2, output depth should be the same as encoder_lstm!
 	    predictor_conv3 = nn.StepConvLSTM(opt.nFiltersMemory[2], opt.nFiltersMemory[2],  -- 5, 15?
 		                 		bufferSize, opt.kernelSize,
 		                        opt.kernelSizeMemory, opt.stride, opt.batchSize, 
-		                        opt.inputSizeW, opt.inputSizeH, defaultType) -- without nngraph
+		                        opt.inputSizeW, opt.inputSizeH, defaultType, 2) -- without nngraph
 
 
-	    encoder = nn.RecursiveSequential(opt.output_nSeq - 1):add(encoder_lstm0):add(encoder_lstm1)
+	    encoder = nn.Sequential():add(encoder_lstm0):add(encoder_lstm1)
 	    -- print(encoder.modules[1].modules[1])
 
 	    -- predictor = nn.SelfFeedSequencer( predictor_1 )
@@ -78,7 +78,8 @@ function runtest2.hkotraning_recur()
 	  	print(encoder)
 	  	print('predictor')
 	  	print(predictor)
-	  	
+	  	print('encoder_predictor')
+	  	print(encoder_predictor)
 
 	  	-- local p_encoder_lstm0, g_encoder_lstm0 = encoder_lstm0:getParameters()
 	  	-- local p_encoder_lstm1, g_encoder_lstm1 = encoder_lstm1:getParameters()
@@ -104,25 +105,62 @@ function runtest2.hkotraning_recur()
 	    target_predictor = torch.Tensor((opt.output_nSeq), opt.batchSize, opt.nFiltersMemory[1], opt.inputSizeH, opt.inputSizeW):normal(1, 0.1)
 
 	    criterion = nn.MSECriterion()
+	    
+		    local p1, g = encoder:getParameters()
+		    print('encoder weight: ', p1:mean())
+		--    p:uniform(-0.08,0.08)
+		    local p, g = predictor:getParameters()
+		--    p:uniform(-0.08,0.08)
+			p:copy(p1):mul(1/2)
+		    print('predictior weight: ', p:mean())
+			print('lstm weight init: p:copy(p1):mul(1/2)')
+		--    local p, g = encoder_predictor:getParameters()
+		--    p:uniform(-0.08,0.08)
+		--    print('encoder_predictor weight: ', p:mean())
 
-		for t =1, 30000 do
+		for t =1, 32000 do
+			if t == 10000 then
+				opt.lr = opt.lr * 0.1
+			end
+			if t == 20000 then
+				opt.lr = opt.lr * 0.1
+			end
+
 		    print('==>'.." online epoch # " .. epoch .. ' [batchSize = ' .. opt.batchSize .. ']')
 		    local tic = torch.tic()
 		    
 		    local iter = t
+
 		    local trainData = trainDataProvider[t]
 		    if t < 5 then
 		    	checkMemory('start iter', gpuid)
 		    end
-		    input_encoder = trainData[1]
-		    packBuffer(input_encoder)
+		    local p, g = encoder:getParameters()
+		    print('encoder weight: ', p:mean())
+		    --p:uniform(-0.08,0.08)
+		    local p, g = predictor:getParameters()
+		    --p:uniform(-0.08,0.08)
+		    print('predictior weight: ', p:mean())
+		    local p, g = encoder_predictor:getParameters()
+		    --p:uniform(-0.08,0.08)
+		    print('encoder_predictor weight: ', p:mean())
+
+		    -- input_encoder = trainData[1]
+		    input_encoder = trainData[1]:narrow(1, 1, opt.input_nSeq - 1) -- dimension1, from index 1, size = input_nSeq - 1
+		    -- input_encoder:resize((opt.input_nSeq - 1)*opt.batchSize, opt.nFiltersMemory[1], opt.inputSizeH, opt.inputSizeW)
+		    input_encoder = packBuffer(input_encoder)
+		    mytester:assert(input_encoder:dim() == 4)
+
+			--input_predictor:resize((1)*opt.batchSize, opt.nFiltersMemory[1], opt.inputSizeH, opt.inputSizeW)
 		    target_predictor = trainData[2]
-		    -- input_predictor = torch.Tensor(bufferSize * opt.batchSize, opt.nFiltersMemory[1], opt.inputSizeH, opt.inputSizeW):fill(0)
-		    input_predictor = torch.Tensor(opt.batchSize, opt.nFiltersMemory[1], opt.inputSizeH, opt.inputSizeW):fill(0)
+		    -- print('target size', target_predictor:size())
+		    input_predictor = torch.Tensor(bufferSize, opt.batchSize, opt.nFiltersMemory[1], opt.inputSizeH, opt.inputSizeW):fill(0)
+		    input_predictor[1] = trainData[1]:narrow(1, opt.input_nSeq, 1) 
+		    input_predictor = packBuffer(input_predictor)
 
 		    input_encoder_predictor = torch.Tensor(opt.output_nSeq, opt.batchSize, opt.nFiltersMemory[2]*2, opt.inputSizeH, opt.inputSizeW)
-		    thre = torch.Tensor(opt.output_nSeq*opt.batchSize, opt.nFiltersMemory[1], opt.inputSizeH, opt.inputSizeW):fill(0.1)
-		    mask = 10 * torch.gt(target_predictor,thre):double()
+		    thre = torch.Tensor(opt.output_nSeq*opt.batchSize, opt.nFiltersMemory[1], opt.inputSizeH, opt.inputSizeW):fill(0.5)
+		    mask = 1 * torch.gt(target_predictor,thre):double()
 
 	    if not opt.onMac then
 	    	encoder:cuda()
@@ -138,13 +176,16 @@ function runtest2.hkotraning_recur()
 			mask = mask:cuda()
 	    end
 
-
 		    encoder_lstm1.module:zeroGradParameters()
 		    encoder_lstm0.module:zeroGradParameters()
 
 		    predictor_conv2.module:zeroGradParameters()
 		    predictor_conv3.module:zeroGradParameters()
 		    encoder_predictor:zeroGradParameters()
+
+		    encoder:zeroGradParameters()
+
+		    predictor:zeroGradParameters()
 
 		    local output_encoder = encoder:forward(input_encoder)
 
@@ -155,38 +196,40 @@ function runtest2.hkotraning_recur()
 
 
 			output_predictor = predictor:forward(input_predictor)
-			packBuffer(output_predictor)
-
-		    packBuffer(target_predictor)
+		    target_predictor = packBuffer(target_predictor)
   
-		    --mytester:assert(output_predictor:size(1) == target_predictor:size(1))
-		    --mytester:assert(output_predictor:size(2) == target_predictor:size(2))
 		    mytester:assert(output_predictor:size(3) == target_predictor:size(3))
 		    mytester:assert(output_predictor:size(4) == target_predictor:size(4))
 
 		    -- ********* pack input **********
 		    
-		    unpackBuffer(encoder_lstm0.output)
-		    unpackBuffer(encoder_lstm1.output)
-		    unpackBuffer(predictor_conv2.output)
-		    unpackBuffer(predictor_conv3.output)
+		    encoder_lstm0.output = unpackBuffer(encoder_lstm0.output)
+		    encoder_lstm1.output = unpackBuffer(encoder_lstm1.output)
+		    predictor_conv2.output = unpackBuffer(predictor_conv2.output)
+		    predictor_conv3.output = unpackBuffer(predictor_conv3.output)
 		    --print(input_encoder_predictor[{{1},{},{1, opt.nFiltersMemory[2]},{},{}}]:size())
 		    --print(encoder_lstm0.output:size())
-		    input_encoder_predictor[{{1},{},{1, opt.nFiltersMemory[2]},{},{}}] = encoder_lstm0.output[{{1},{},{},{},{}}]
-		    input_encoder_predictor[{{1},{},{1 + opt.nFiltersMemory[2], 2* opt.nFiltersMemory[2]},{},{}}] = encoder_lstm1.output[{{1},{},{},{},{}}]
-		    input_encoder_predictor[{{2, opt.output_nSeq},{},{1, opt.nFiltersMemory[2]},{},{}}] = predictor_conv2.output
-		    input_encoder_predictor[{{2, opt.output_nSeq},{},{1 + opt.nFiltersMemory[2], 2* opt.nFiltersMemory[2]},{},{}}] = predictor_conv3.output
+		    --input_encoder_predictor[{{1},{},{1, opt.nFiltersMemory[2]},{},{}}] = encoder_lstm0.output[{{1},{},{},{},{}}]
+		    --input_encoder_predictor[{{1},{},{1 + opt.nFiltersMemory[2], 2* opt.nFiltersMemory[2]},{},{}}] = encoder_lstm1.output[{{1},{},{},{},{}}]
+		    input_encoder_predictor[{{1, opt.output_nSeq},{},{1, opt.nFiltersMemory[2]},{},{}}] = predictor_conv2.output
+		    input_encoder_predictor[{{1, opt.output_nSeq},{},{1 + opt.nFiltersMemory[2], 2* opt.nFiltersMemory[2]},{},{}}] = predictor_conv3.output
 
 
-		    packBuffer(encoder_lstm0.output)
-		    packBuffer(encoder_lstm1.output)
-		    packBuffer(predictor_conv2.output)
-		    packBuffer(predictor_conv3.output)
+		    encoder_lstm0.output = packBuffer(encoder_lstm0.output)
+		    encoder_lstm1.output = packBuffer(encoder_lstm1.output)
+		    predictor_conv2.output = packBuffer(predictor_conv2.output)
+		    predictor_conv3.output = packBuffer(predictor_conv3.output)
 		    -- *******************************
-		    packBuffer(input_encoder_predictor)
+		    input_encoder_predictor = packBuffer(input_encoder_predictor)
 		    prediction = encoder_predictor:forward(input_encoder_predictor)
+		    -- prediction:clamp(0, 1)
 		    -- unpackBuffer(input_encoder_predictor)
-		    target_predictor = torch.add(target_predictor, mask)
+		    print('prediction max and min:', prediction:max(), prediction:min(), prediction:mean())
+		    print('target max and min:', target_predictor:max(), target_predictor:min(), target_predictor:mean())
+
+		    if opt.useMask then
+		    	target_predictor = torch.add(target_predictor, mask)
+			end		    	
 		    accErr = criterion:forward(prediction, target_predictor)
 		    gradOutput =  criterion:backward(prediction, target_predictor)
 
@@ -197,23 +240,24 @@ function runtest2.hkotraning_recur()
 		    --print(gradOutput:size())
 		    --print(prediction:size())
 		    grad_input_encoder_predictor = encoder_predictor:backward(input_encoder_predictor, gradOutput)
-
 		    -- ************* unpack gradInput **********
-		    unpackBuffer(grad_input_encoder_predictor)
+		    grad_input_encoder_predictor = unpackBuffer(grad_input_encoder_predictor)
 
 		    local encoder_lstm0_grad_output = grad_input_encoder_predictor[{{1},{},{1, opt.nFiltersMemory[2]},{},{}}]
 		    local encoder_lstm1_grad_output = grad_input_encoder_predictor[{{1},{},{1 + opt.nFiltersMemory[2], 2*opt.nFiltersMemory[2]},{},{}}]
-		    local predictor_conv2_grad_output = grad_input_encoder_predictor[{{2, opt.output_nSeq},{},{1, opt.nFiltersMemory[2]},{},{}}]
-		    local predictor_conv3_grad_output = grad_input_encoder_predictor[{{2, opt.output_nSeq},{},{1 + opt.nFiltersMemory[2], 2*	opt.nFiltersMemory[2]},{},{}}]
+		    local predictor_conv2_grad_output = grad_input_encoder_predictor[{{1, opt.output_nSeq},{},{1, opt.nFiltersMemory[2]},{},{}}]
+		    local predictor_conv3_grad_output = grad_input_encoder_predictor[{{1, opt.output_nSeq},{},{1 + opt.nFiltersMemory[2], 2*opt.nFiltersMemory[2]},{},{}}]
 
-		    packBuffer(encoder_lstm0_grad_output)
-		    packBuffer(encoder_lstm1_grad_output)
-		    packBuffer(predictor_conv2_grad_output)
-		    packBuffer(predictor_conv3_grad_output)
-		    encoder_lstm0:maxBackWard(input_encoder, encoder_lstm0_grad_output)
-		    encoder_lstm1:maxBackWard(encoder_lstm0.output, encoder_lstm1_grad_output)
+		    encoder_lstm0_grad_output = packBuffer(encoder_lstm0_grad_output)
+		    encoder_lstm1_grad_output = packBuffer(encoder_lstm1_grad_output)
+		    predictor_conv2_grad_output = packBuffer(predictor_conv2_grad_output)
+		    predictor_conv3_grad_output = packBuffer(predictor_conv3_grad_output)
+		    -- encoder_lstm0:maxBackWard(input_encoder, encoder_lstm0_grad_output)
+		    -- encoder_lstm1:maxBackWard(encoder_lstm0.output, encoder_lstm1_grad_output)
+
+		    local gradInput_conv3 = predictor_conv3:backward(predictor_conv2.output, predictor_conv3_grad_output)
+		    predictor_conv2_grad_output:add(gradInput_conv3)
 		    predictor_conv2:backward(input_predictor, predictor_conv2_grad_output)
-		    predictor_conv3:backward(predictor_conv2.output, predictor_conv3_grad_output)
 
 		    -- *****************************************
 		    --print('prediction mean:' , prediction:mean(), 'target mean ', target_predictor:mean(), 'predictor_conv2_grad_output: ',predictor_conv2_grad_output:mean())
@@ -230,12 +274,21 @@ function runtest2.hkotraning_recur()
 
 		    encoder_lstm1.gradPrevCell = predictor_conv3.gradPrevCell
 		    encoder_lstm1:maxBackWard(encoder_lstm0.output, predictor_conv3.lastGradPrevOutput)
-
-		    encoder_lstm1:updateParameters(0.01)
-		    encoder_lstm0:updateParameters(0.01)
-
-		    predictor_conv2:updateParameters(0.01)
-		    predictor_conv3:updateParameters(0.01)
+		    local lr = opt.lr or 1e-6
+	--[[		    
+			momentumUpdateParameters(encoder_lstm1.module, lr)
+			momentumUpdateParameters(encoder_lstm0.module, lr)
+			momentumUpdateParameters(predictor_conv2.module, lr)
+			momentumUpdateParameters(predictor_conv3.module, lr)
+			momentumUpdateParameters(encoder_predictor, lr)
+		
+			encoder_lstm1.module:updateParameters(lr*10)
+			encoder_lstm0.module:updateParameters(lr*10)
+			predictor_conv2.module:updateParameters(lr)
+			predictor_conv3.module:updateParameters(lr)
+			encoder_predictor:updateParameters(lr)
+]]--
+			-- weightVis(encoder_predictor, 'encoder_predictor_weight', t)
 
 		    mytester:assertTensorEq(predictor_conv2.initCell, encoder_lstm0.lastCell, 0.0001)
 
@@ -245,36 +298,61 @@ function runtest2.hkotraning_recur()
 		    if math.fmod(t, opt.saveInterval) == 1 or t == 1 then
 		    	-- print(output:size())
 		    	print('save')
+		    	saveImageSequence(packBuffer(grad_input_encoder_predictor),'seq_encoder_predictor_grad_input', t, epochSaveDir)
+		    	saveImageDepth(packBuffer(grad_input_encoder_predictor),'dep_encoder_predictor_grad_input', t, epochSaveDir)
+		    	saveImageSequence(encoder_lstm0_grad_output,'seq_lstm0_grad_output', t, epochSaveDir)
+		    	saveImageDepth(encoder_lstm0_grad_output,'dep_lstm0_grad_output', t, epochSaveDir)
+		    	saveImageSequence(encoder_lstm1_grad_output,'seq_lstm1_grad_output', t, epochSaveDir)
+		    	saveImageDepth(encoder_lstm1_grad_output,'dep_lstm1_grad_output', t, epochSaveDir)
+		    	saveImageSequence(predictor_conv2_grad_output,'seq_conv2_grad_output', t, epochSaveDir)
+		    	saveImageDepth(predictor_conv2_grad_output,'dep_conv2_grad_output', t, epochSaveDir)
+		    	saveImageSequence(predictor_conv3_grad_output,'seq_conv3_grad_output', t, epochSaveDir)
+		    	saveImageDepth(predictor_conv3_grad_output,'dep_conv3_grad_output', t, epochSaveDir)
+		    	local allin = unpackBuffer(input_encoder_predictor)
 
-		    	saveImage(output_encoder, 'output_encoder', t)
-		    	unpackBuffer(prediction)
-		    	unpackBuffer(target_predictor)
-		    	unpackBuffer(encoder_lstm0.output)
-		    	unpackBuffer(predictor_conv2_grad_output)
-		    	unpackBuffer(predictor_conv3_grad_output)
-		    	unpackBuffer(encoder_lstm0_grad_output)
-		    	unpackBuffer(encoder_lstm1_grad_output)
+		    	allin = makeContiguous(allin:select(2, 1))
+		    	saveImageAll(allin, 'allin', t, epochSaveDir)
+		    	-- allin = allin:resize(allin:size(1) * allin:size(2), allin:size(2)*allin:size(4))
+		    	-- saveImageSequence(input_encoder_predictor, 'dep_input_encoder_predictor', t)
+				-- print('sizei of all in ', allin:size())
+		    	-- saveImage(allin, 'allin', t)
+
+		    	saveImageAll(unpackBuffer(predictor_conv3.output):select(2,1), 'all_output_conv3', t, epochSaveDir)
+		    	saveImageAll(unpackBuffer(predictor_conv2.output):select(2,1), 'all_output_conv2', t, epochSaveDir)
+		    	saveImageAll(unpackBuffer(encoder_lstm0.output):select(2,1), 'all_output_lstm0', t, epochSaveDir)
+		    	saveImageAll(unpackBuffer(encoder_lstm1.output):select(2,1), 'all_output_lstm1', t, epochSaveDir)
+
+		    	saveImageAll(unpackBuffer(prediction):select(2,1), 'all_prediction', t, epochSaveDir)
+
+
+		    	saveImageAll(unpackBuffer(target_predictor):select(2,1), 'all_target', t, epochSaveDir)
+
+
+		    	saveImageSequence(predictor_conv3.output,'seq_output_conv3', t, epochSaveDir)
+		    	saveImageSequence(predictor_conv2.output,'seq_output_conv2', t, epochSaveDir)
+		    	saveImageSequence(encoder_lstm0.output,'seq_output_lstm0', t, epochSaveDir)
+		    	saveImageSequence(encoder_lstm1.output,'seq_output_lstm1', t, epochSaveDir)
+
+		    	saveImageDepth(predictor_conv3.output,'dep_output_conv3', t, epochSaveDir)
+		    	saveImageDepth(predictor_conv2.output,'dep_output_conv2', t, epochSaveDir)
+		    	saveImageDepth(encoder_lstm0.output,'dep_output_lstm0', t, epochSaveDir)
+		    	saveImageDepth(encoder_lstm1.output,'dep_output_lstm1', t, epochSaveDir)
+
+		    	saveImageSequence(predictor_conv3.cells,'seq_cells_conv3', t, epochSaveDir)
+		    	saveImageSequence(predictor_conv2.cells,'seq_cells_conv2', t, epochSaveDir)
+		    	saveImageSequence(encoder_lstm0.cells,'seq_cells_lstm0', t, epochSaveDir)
+		    	saveImageSequence(encoder_lstm1.cells,'seq_cells_lstm1', t, epochSaveDir)
+
+		    	saveImageDepth(predictor_conv3.cells,'dep_cells_conv3', t, epochSaveDir)
+		    	saveImageDepth(predictor_conv2.cells,'dep_cells_conv2', t, epochSaveDir)
+		    	saveImageDepth(encoder_lstm0.cells,'dep_cells_lstm0', t, epochSaveDir)
+		    	saveImageDepth(encoder_lstm1.cells,'dep_cells_lstm1', t, epochSaveDir)
 		    	
-		    	saveImage(grad_input_encoder_predictor,'grad_input_encoder_predictor', t)
+		    	saveImage(unpackBuffer(prediction/prediction:max()), 'output2', t, epochSaveDir)
 
-		    	saveImage(encoder_lstm1_grad_output,'encoder_lstm1_grad_output', t)
+		    	saveImage(unpackBuffer(prediction), 'output', t, epochSaveDir)
+		    	saveImage(unpackBuffer(target_predictor), 'target', t, epochSaveDir)
 
-		    	saveImage(predictor_conv3_grad_output, 'predictor_conv3_grad_output', t)
-
-		    	saveImage(encoder_lstm0_grad_output,'encoder_lstm0_grad_output', t)
-		    	saveImage(predictor_conv2_grad_output, 'predictor_conv2_grad_output', t)
-		    	saveImage(encoder_lstm0.output, 'encoder_lstm0_output', t)
-		    	saveImage(prediction, 'output', t)
-		    	saveImage(target_predictor, 'target', t)
-
-		    	packBuffer(encoder_lstm0.output)
-		    	packBuffer(encoder_lstm0_grad_output)
-		    	packBuffer(encoder_lstm1_grad_output)
-
-		    	packBuffer(prediction)
-		    	packBuffer(target_predictor)
-		    	-- saveImage(gradInput, 'gradInput', t)
-		    	-- { Tensor(batch * depth * h * w), Tensor(batch * depth * h * w), Tensor(batch * depth * h * w), }
 			end
 			local toc = torch.toc(tic)
 			print('time used: ',toc)
@@ -289,8 +367,523 @@ function runtest2.hkotraning_recur()
 end
 
 
+----------------------------------
+function runtest2.hkotraning()
+
+	local gpuid = selectFreeGpu()
+	local data_path
+	if not opt.onMac then
+		data_path = '/csproject/dygroup2/xiaohui/ConvLSTM/helper/'
+	else
+		data_path = '../../../ConvLSTM/helper/'	
+	end
+	nn.StepConvLSTM.usenngraph = true
+	trainDataProvider = getdataTensor_hko('train', data_path)
+	assert(trainDataProvider[1162])
+
+	-- validDataProvider = getdataSeq_hko('valid', data_path)
+	encoder_lstm0 = nn.StepConvLSTM(opt.nFiltersMemory[1], opt.nFiltersMemory[2],  -- 5, 15?
+	                 		opt.input_nSeq , opt.kernelSize,
+	                        opt.kernelSizeMemory, opt.stride, 
+	                        opt.batchSize, opt.inputSizeW, opt.inputSizeH, defaultType, 1) -- without nngraph
+
+	encoder_lstm1 = nn.StepConvLSTM(opt.nFiltersMemory[2], opt.nFiltersMemory[1],  -- 5, 15?
+	                 		opt.input_nSeq , opt.kernelSize,
+	                        opt.kernelSizeMemory, opt.stride, 
+	                        opt.batchSize, opt.inputSizeW, opt.inputSizeH, defaultType, 1) -- without nngraph
+	
+	bufferSize = 1 -- opt.output_nSeq 
+    predictor_conv2 = nn.StepConvLSTM(opt.nFiltersMemory[1], opt.nFiltersMemory[2],  -- 5, 15?
+	                 		bufferSize, opt.kernelSize,
+	                        opt.kernelSizeMemory, opt.stride, opt.batchSize, 
+	                        opt.inputSizeW, opt.inputSizeH, defaultType, 2) -- without nngraph
+    -- predictor_conv3 and 2, output depth should be the same as encoder_lstm!
+    predictor_conv3 = nn.StepConvLSTM(opt.nFiltersMemory[2], opt.nFiltersMemory[1],  -- 5, 15?
+	                 		bufferSize, opt.kernelSize,
+	                        opt.kernelSizeMemory, opt.stride, opt.batchSize, 
+	                        opt.inputSizeW, opt.inputSizeH, defaultType, 2) -- without nngraph
+
+
+    encoder = nn.Sequential():add(encoder_lstm0):add(encoder_lstm1)
+    -- print(encoder.modules[1].modules[1])
+
+    -- predictor = nn.SelfFeedSequencer( predictor_1 )
+    predictor = nn.RecursiveSequential(opt.output_nSeq)
+    						:add(predictor_conv2)
+    						:add(predictor_conv3)
+    						--:add(encoder_predictor)]]--
+    --predictor = nn.Sequential():add(predictor_conv2):add(predictor_conv3)
+	encoder_predictor = nn.SpatialConvolution(opt.nFiltersMemory[2]*2, opt.nFiltersMemory[1], 
+    										opt.decoderKernelSize, opt.decoderKernelSize, 1, 1, 
+    										math.floor(opt.decoderKernelSize / 2), 
+    										math.floor(opt.decoderKernelSize / 2))
+
+	w_init(encoder_predictor)
+    print('number of parameters of repeatModel', encoder:getParameters():size(1) 
+    											+ predictor:getParameters():size(1)
+    											+ encoder_predictor:getParameters():size(1) )
+
+    print('encoder')
+  	print(encoder)
+  	print('predictor')
+  	print(predictor)
+  	print('encoder_predictor')
+  	print(encoder_predictor)
+
+	-----------------------------------  building model done ----------------------------------
+
+
+	epoch = epoch or 1  
+	-- local epochSaveDir = imageDir..'train-epoch'..tostring(epoch)..'/'
+ 	-- if not paths.dirp(epochSaveDir) then os.execute('mkdir -p ' .. epochSaveDir) end
+	encoder:remember('both')
+	encoder:training()
+	predictor:remember('both') 
+	predictor:training()
+
+	local accErr = 0
+
+    --input_encoder = torch.Tensor((opt.input_nSeq - 1)*opt.batchSize, opt.nFiltersMemory[1], opt.inputSizeH, opt.inputSizeW):normal(1, 0.1)
+    input_predictor = torch.Tensor(opt.batchSize, opt.nFiltersMemory[1], opt.inputSizeH, opt.inputSizeW):normal(1, 0.1)
+    target_predictor = torch.Tensor((opt.output_nSeq), opt.batchSize, opt.nFiltersMemory[1], opt.inputSizeH, opt.inputSizeW):normal(1, 0.1)
+
+    criterion = nn.MSECriterion()
+
+	for t =1, 30000 do
+	    print('==>'.." online epoch # " .. epoch .. ' [batchSize = ' .. opt.batchSize .. ']')
+	    local tic = torch.tic()
+	    
+	    local iter = t
+
+	    local trainData = trainDataProvider[t]
+	    if t < 5 then
+	    	checkMemory('start iter', gpuid)
+	    end
+	    input_encoder = trainData[1]
+	    --input_encoder = trainData[1]:narrow(1, 1, opt.input_nSeq - 1) -- dimension1, from index 1, size = input_nSeq - 1
+	    --input_predictor = trainData[1]:narrow(1, opt.input_nSeq, 1) 
+	    -- input_encoder:resize((opt.input_nSeq - 1)*opt.batchSize, opt.nFiltersMemory[1], opt.inputSizeH, opt.inputSizeW)
+	    input_encoder = packBuffer(input_encoder)
+	    mytester:assert(input_encoder:dim() == 4)
+
+		--input_predictor:resize((1)*opt.batchSize, opt.nFiltersMemory[1], opt.inputSizeH, opt.inputSizeW)
+	    target_predictor = trainData[2]
+	    -- print('target size', target_predictor:size())
+	    input_predictor = torch.Tensor(bufferSize * opt.batchSize, opt.nFiltersMemory[1], opt.inputSizeH, opt.inputSizeW):fill(0)
+	    input_encoder_predictor = torch.Tensor(opt.output_nSeq, opt.batchSize, opt.nFiltersMemory[2]*2, opt.inputSizeH, opt.inputSizeW)
+	    thre = torch.Tensor(opt.output_nSeq*opt.batchSize, opt.nFiltersMemory[1], opt.inputSizeH, opt.inputSizeW):fill(0.5)
+	    mask = 1 * torch.gt(target_predictor,thre):double()
+
+	    if not opt.onMac then
+	    	encoder:cuda()
+	    	predictor:cuda()
+	    	encoder_predictor:cuda()
+	    	criterion:cuda()
+
+	    	input_encoder = input_encoder:cuda()
+			input_predictor = input_predictor:cuda()
+	    	target_predictor = target_predictor:cuda()
+			input_encoder_predictor = input_encoder_predictor:cuda()
+			-- thre = thre:cuda()
+			mask = mask:cuda()
+	    end
+
+	    encoder_lstm1.module:zeroGradParameters()
+	    encoder_lstm0.module:zeroGradParameters()
+
+	    predictor_conv2.module:zeroGradParameters()
+	    predictor_conv3.module:zeroGradParameters()
+	    encoder_predictor:zeroGradParameters()
+
+	    encoder:zeroGradParameters()
+
+	    predictor:zeroGradParameters()
+
+
+	    local output_encoder = encoder:forward(input_encoder)
+
+	    predictor_conv2.initCell = encoder_lstm0.lastCell
+	    predictor_conv3.initCell = encoder_lstm1.lastCell
+	    predictor_conv2.initOutput = encoder_lstm0.lastOutput
+	    predictor_conv3.initOutput = encoder_lstm1.lastOutput
+prediction, accErr, gradOutput = predictor:autoForwardAndBackward(input_predictor, target_predictor)
+-- print(gradOutput:size()) -- 3,1,100,100 (batch, depth, h, w)
+	    assert(gradOutput:size(1) == opt.batchSize)
+	    assert(gradOutput:size(3) == opt.inputSizeH)
+	    assert(gradOutput:size(4) == opt.inputSizeW)
+	    -- target_predictor = packBuffer(target_predictor)
+
+	    -- ********* pack input **********
+	    
+	    encoder_lstm0.output = unpackBuffer(encoder_lstm0.output)
+	    encoder_lstm1.output = unpackBuffer(encoder_lstm1.output)
+	    predictor_conv2.output = unpackBuffer(predictor_conv2.output)
+	    predictor_conv3.output = unpackBuffer(predictor_conv3.output)
+
+	    encoder_lstm0.output = packBuffer(encoder_lstm0.output)
+	    encoder_lstm1.output = packBuffer(encoder_lstm1.output)
+	    predictor_conv2.output = packBuffer(predictor_conv2.output)
+	    predictor_conv3.output = packBuffer(predictor_conv3.output)
+	    -- *******************************
+
+	    print('prediction max and min:', prediction:max(), prediction:min(), prediction:mean())
+	    print('target max and min:', target_predictor:max(), target_predictor:min(), target_predictor:mean())
+
+	    if opt.useMask then
+	    	target_predictor = torch.add(target_predictor, mask)
+		end		    	
+		-- print(target_predictor:size())
+		-- print(prediction:size())
+	    -- accErr = criterion:forward(prediction, target_predictor)
+	    -- gradOutput =  criterion:backward(prediction, target_predictor)
+
+	    -- assert(gradOutput:size(1) == opt.output_nSeq*opt.batchSize)
+
+	    -- assert(gradOutput:size(2) == target_predictor:size(2))
+	    -- assert(gradOutput:size(3) == opt.inputSizeH)
+	    -- assert(gradOutput)
+	    --print(gradOutput:size())
+	    --print(prediction:size())
+	    -- gradInput_predictor = predictor:backward(input_predictor, gradOutput)
+		--	grad_input_encoder_predictor = encoder_predictor:backward(input_encoder_predictor, gradOutput)
+
+	    encoder_lstm0.gradPrevCell = predictor_conv2.gradPrevCell
+	    encoder_lstm0:maxBackWard(input_encoder, predictor_conv2.lastGradPrevOutput)
+
+	    encoder_lstm1.gradPrevCell = predictor_conv3.gradPrevCell
+	    encoder_lstm1:maxBackWard(encoder_lstm0.output, predictor_conv3.lastGradPrevOutput)
+	    local lr = opt.lr or 1e-6
+	    
+		momentumUpdateParameters(encoder_lstm1, lr)
+		momentumUpdateParameters(encoder_lstm0, lr)
+		momentumUpdateParameters(predictor_conv2, lr)
+		momentumUpdateParameters(predictor_conv3, lr)
+		momentumUpdateParameters(encoder_predictor, lr)
+		--[[		
+				encoder_lstm1:updateParameters(lr)
+				encoder_lstm0:updateParameters(lr)
+				predictor_conv2:updateParameters(lr)
+				predictor_conv3:updateParameters(lr)
+				encoder_predictor:updateParameters(lr)
+		]]--
+				-- weightVis(encoder_predictor, 'encoder_predictor_weight', t)
+
+		    mytester:assertTensorEq(predictor_conv2.initCell, encoder_lstm0.lastCell, 0.0001)
+
+			print("\titer",t, "err:", accErr*10000)
+			-- print(output:size())
+		    
+		    if math.fmod(t, opt.saveInterval) == 1 or t == 1 then
+		    	-- print(output:size())
+		    	print('save')
+
+		    	saveImageAll(unpackBuffer(predictor_conv3.output):select(2,1), 'all_output_conv3', t)
+		    	saveImageAll(unpackBuffer(predictor_conv2.output):select(2,1), 'all_output_conv2', t)
+		    	saveImageAll(unpackBuffer(encoder_lstm0.output):select(2,1), 'all_output_lstm0', t)
+		    	saveImageAll(unpackBuffer(encoder_lstm1.output):select(2,1), 'all_output_lstm1', t)
+
+		    	saveImageSequence(predictor_conv3.output,'seq_output_conv3', t)
+		    	saveImageSequence(predictor_conv2.output,'seq_output_conv2', t)
+		    	saveImageSequence(encoder_lstm0.output,'seq_output_lstm0', t)
+		    	saveImageSequence(encoder_lstm1.output,'seq_output_lstm1', t)
+
+		    	saveImageDepth(predictor_conv3.output,'dep_output_conv3', t)
+		    	saveImageDepth(predictor_conv2.output,'dep_output_conv2', t)
+		    	saveImageDepth(encoder_lstm0.output,'dep_output_lstm0', t)
+		    	saveImageDepth(encoder_lstm1.output,'dep_output_lstm1', t)
+
+		    	saveImageSequence(predictor_conv3.cells,'seq_cells_conv3', t)
+		    	saveImageSequence(predictor_conv2.cells,'seq_cells_conv2', t)
+		    	saveImageSequence(encoder_lstm0.cells,'seq_cells_lstm0', t)
+		    	saveImageSequence(encoder_lstm1.cells,'seq_cells_lstm1', t)
+
+		    	saveImageDepth(predictor_conv3.cells,'dep_cells_conv3', t)
+		    	saveImageDepth(predictor_conv2.cells,'dep_cells_conv2', t)
+		    	saveImageDepth(encoder_lstm0.cells,'dep_cells_lstm0', t)
+		    	saveImageDepth(encoder_lstm1.cells,'dep_cells_lstm1', t)
+		    	saveImage(prediction, 'output', t)
+		    	saveImage(target_predictor, 'target', t)
+
+--		    	saveImage(unpackBuffer(prediction), 'output', t)
+--		    	saveImage(unpackBuffer(target_predictor), 'target', t)
+			end
+			
+			local toc = torch.toc(tic)
+			print('time used: ',toc)
+		    if t < 5 then
+		    	checkMemory('after iter', gpuid)
+		    end
+			collectgarbage()
+		    if t < 5 then
+		    	checkMemory('after collectgarbage', gpuid)
+		    end
+	end
+end
+
+
 -----------------------------------
-function runtest.hkotraning()
+function runtest2.hkotraning_noconv()
+
+	local gpuid = selectFreeGpu()
+	local data_path
+	if not opt.onMac then
+		data_path = '/csproject/dygroup2/xiaohui/ConvLSTM/helper/'
+	else
+		data_path = '../../../ConvLSTM/helper/'	
+	end
+	nn.StepConvLSTM.usenngraph = true
+	trainDataProvider = getdataTensor_hko('train', data_path)
+	assert(trainDataProvider[1162])
+
+	-- validDataProvider = getdataSeq_hko('valid', data_path)
+	encoder_lstm0 = nn.StepConvLSTM(opt.nFiltersMemory[1], opt.nFiltersMemory[2],  -- 5, 15?
+	                 		opt.input_nSeq , opt.kernelSize,
+	                        opt.kernelSizeMemory, opt.stride, 
+	                        opt.batchSize, opt.inputSizeW, opt.inputSizeH, defaultType, 1) -- without nngraph
+
+	encoder_lstm1 = nn.StepConvLSTM(opt.nFiltersMemory[2], opt.nFiltersMemory[1],  -- 5, 15?
+	                 		opt.input_nSeq , opt.kernelSize,
+	                        opt.kernelSizeMemory, opt.stride, 
+	                        opt.batchSize, opt.inputSizeW, opt.inputSizeH, defaultType, 1) -- without nngraph
+	
+	bufferSize = opt.output_nSeq 
+    predictor_conv2 = nn.StepConvLSTM(opt.nFiltersMemory[1], opt.nFiltersMemory[2],  -- 5, 15?
+	                 		bufferSize, opt.kernelSize,
+	                        opt.kernelSizeMemory, opt.stride, opt.batchSize, 
+	                        opt.inputSizeW, opt.inputSizeH, defaultType, 2) -- without nngraph
+    -- predictor_conv3 and 2, output depth should be the same as encoder_lstm!
+    predictor_conv3 = nn.StepConvLSTM(opt.nFiltersMemory[2], opt.nFiltersMemory[1],  -- 5, 15?
+	                 		bufferSize, opt.kernelSize,
+	                        opt.kernelSizeMemory, opt.stride, opt.batchSize, 
+	                        opt.inputSizeW, opt.inputSizeH, defaultType, 2) -- without nngraph
+
+
+    encoder = nn.Sequential():add(encoder_lstm0):add(encoder_lstm1)
+    -- print(encoder.modules[1].modules[1])
+
+    -- predictor = nn.SelfFeedSequencer( predictor_1 )
+    --[[predictor = nn.RecursiveSequential(opt.output_nSeq)
+    						:add(predictor_conv2)
+    						:add(predictor_conv3)
+    						:add(encoder_predictor)]]--
+    predictor = nn.Sequential():add(predictor_conv2):add(predictor_conv3)
+	encoder_predictor = nn.SpatialConvolution(opt.nFiltersMemory[2]*2, opt.nFiltersMemory[1], 
+    										opt.decoderKernelSize, opt.decoderKernelSize, 1, 1, 
+    										math.floor(opt.decoderKernelSize / 2), 
+    										math.floor(opt.decoderKernelSize / 2))
+
+	w_init(encoder_predictor)
+    print('number of parameters of repeatModel', encoder:getParameters():size(1) 
+    											+ predictor:getParameters():size(1)
+    											+ encoder_predictor:getParameters():size(1) )
+
+    print('encoder')
+  	print(encoder)
+  	print('predictor')
+  	print(predictor)
+  	print('encoder_predictor')
+  	print(encoder_predictor)
+
+	-----------------------------------  building model done ----------------------------------
+
+
+	epoch = epoch or 1  
+	-- local epochSaveDir = imageDir..'train-epoch'..tostring(epoch)..'/'
+ 	-- if not paths.dirp(epochSaveDir) then os.execute('mkdir -p ' .. epochSaveDir) end
+	encoder:remember('both')
+	encoder:training()
+	predictor:remember('both') 
+	predictor:training()
+
+	local accErr = 0
+
+    --input_encoder = torch.Tensor((opt.input_nSeq - 1)*opt.batchSize, opt.nFiltersMemory[1], opt.inputSizeH, opt.inputSizeW):normal(1, 0.1)
+    input_predictor = torch.Tensor(opt.batchSize, opt.nFiltersMemory[1], opt.inputSizeH, opt.inputSizeW):normal(1, 0.1)
+    target_predictor = torch.Tensor((opt.output_nSeq), opt.batchSize, opt.nFiltersMemory[1], opt.inputSizeH, opt.inputSizeW):normal(1, 0.1)
+
+    criterion = nn.MSECriterion()
+
+	for t =1, 30000 do
+	    print('==>'.." online epoch # " .. epoch .. ' [batchSize = ' .. opt.batchSize .. ']')
+	    local tic = torch.tic()
+	    
+	    local iter = t
+
+	    local trainData = trainDataProvider[t]
+	    if t < 5 then
+	    	checkMemory('start iter', gpuid)
+	    end
+	    input_encoder = trainData[1]
+	    --input_encoder = trainData[1]:narrow(1, 1, opt.input_nSeq - 1) -- dimension1, from index 1, size = input_nSeq - 1
+	    --input_predictor = trainData[1]:narrow(1, opt.input_nSeq, 1) 
+	    -- input_encoder:resize((opt.input_nSeq - 1)*opt.batchSize, opt.nFiltersMemory[1], opt.inputSizeH, opt.inputSizeW)
+	    input_encoder = packBuffer(input_encoder)
+	    mytester:assert(input_encoder:dim() == 4)
+
+		--input_predictor:resize((1)*opt.batchSize, opt.nFiltersMemory[1], opt.inputSizeH, opt.inputSizeW)
+	    target_predictor = trainData[2]
+	    -- print('target size', target_predictor:size())
+	    input_predictor = torch.Tensor(bufferSize * opt.batchSize, opt.nFiltersMemory[1], opt.inputSizeH, opt.inputSizeW):fill(0)
+	    input_encoder_predictor = torch.Tensor(opt.output_nSeq, opt.batchSize, opt.nFiltersMemory[2]*2, opt.inputSizeH, opt.inputSizeW)
+	    thre = torch.Tensor(opt.output_nSeq*opt.batchSize, opt.nFiltersMemory[1], opt.inputSizeH, opt.inputSizeW):fill(0.5)
+	    mask = 1 * torch.gt(target_predictor,thre):double()
+
+	    if not opt.onMac then
+	    	encoder:cuda()
+	    	predictor:cuda()
+	    	encoder_predictor:cuda()
+	    	criterion:cuda()
+
+	    	input_encoder = input_encoder:cuda()
+			input_predictor = input_predictor:cuda()
+	    	target_predictor = target_predictor:cuda()
+			input_encoder_predictor = input_encoder_predictor:cuda()
+			-- thre = thre:cuda()
+			mask = mask:cuda()
+	    end
+
+	    encoder_lstm1.module:zeroGradParameters()
+	    encoder_lstm0.module:zeroGradParameters()
+
+	    predictor_conv2.module:zeroGradParameters()
+	    predictor_conv3.module:zeroGradParameters()
+	    encoder_predictor:zeroGradParameters()
+
+	    encoder:zeroGradParameters()
+
+	    predictor:zeroGradParameters()
+
+
+	    local output_encoder = encoder:forward(input_encoder)
+
+	    predictor_conv2.initCell = encoder_lstm0.lastCell
+	    predictor_conv3.initCell = encoder_lstm1.lastCell
+	    predictor_conv2.initOutput = encoder_lstm0.lastOutput
+	    predictor_conv3.initOutput = encoder_lstm1.lastOutput
+
+		prediction = predictor:forward(input_predictor)
+	    target_predictor = packBuffer(target_predictor)
+
+	    -- ********* pack input **********
+	    
+	    encoder_lstm0.output = unpackBuffer(encoder_lstm0.output)
+	    encoder_lstm1.output = unpackBuffer(encoder_lstm1.output)
+	    predictor_conv2.output = unpackBuffer(predictor_conv2.output)
+	    predictor_conv3.output = unpackBuffer(predictor_conv3.output)
+
+	    encoder_lstm0.output = packBuffer(encoder_lstm0.output)
+	    encoder_lstm1.output = packBuffer(encoder_lstm1.output)
+	    predictor_conv2.output = packBuffer(predictor_conv2.output)
+	    predictor_conv3.output = packBuffer(predictor_conv3.output)
+	    -- *******************************
+
+	    print('prediction max and min:', prediction:max(), prediction:min(), prediction:mean())
+	    print('target max and min:', target_predictor:max(), target_predictor:min(), target_predictor:mean())
+
+	    if opt.useMask then
+	    	target_predictor = torch.add(target_predictor, mask)
+		end		    	
+		-- print(target_predictor:size())
+		-- print(prediction:size())
+	    accErr = criterion:forward(prediction, target_predictor)
+	    gradOutput =  criterion:backward(prediction, target_predictor)
+
+	    assert(gradOutput:size(1) == opt.output_nSeq*opt.batchSize)
+	    assert(gradOutput:size(2) == target_predictor:size(2))
+	    assert(gradOutput:size(3) == opt.inputSizeH)
+	    assert(gradOutput)
+	    --print(gradOutput:size())
+	    --print(prediction:size())
+	    gradInput_predictor = predictor:backward(input_predictor, gradOutput)
+		--	grad_input_encoder_predictor = encoder_predictor:backward(input_encoder_predictor, gradOutput)
+
+	    encoder_lstm0.gradPrevCell = predictor_conv2.gradPrevCell
+	    encoder_lstm0:maxBackWard(input_encoder, predictor_conv2.lastGradPrevOutput)
+
+	    encoder_lstm1.gradPrevCell = predictor_conv3.gradPrevCell
+	    encoder_lstm1:maxBackWard(encoder_lstm0.output, predictor_conv3.lastGradPrevOutput)
+	    local lr = opt.lr or 1e-6
+	    
+		momentumUpdateParameters(encoder_lstm1, lr)
+		momentumUpdateParameters(encoder_lstm0, lr)
+		momentumUpdateParameters(predictor_conv2, lr)
+		momentumUpdateParameters(predictor_conv3, lr)
+		momentumUpdateParameters(encoder_predictor, lr)
+		--[[		
+				encoder_lstm1:updateParameters(lr)
+				encoder_lstm0:updateParameters(lr)
+				predictor_conv2:updateParameters(lr)
+				predictor_conv3:updateParameters(lr)
+				encoder_predictor:updateParameters(lr)
+		]]--
+				-- weightVis(encoder_predictor, 'encoder_predictor_weight', t)
+
+		    mytester:assertTensorEq(predictor_conv2.initCell, encoder_lstm0.lastCell, 0.0001)
+
+			print("\titer",t, "err:", accErr*10000)
+			-- print(output:size())
+		    
+		    if math.fmod(t, opt.saveInterval) == 1 or t == 1 then
+		    	-- print(output:size())
+		    	print('save')
+
+		    	saveImageAll(unpackBuffer(predictor_conv3.output):select(2,1), 'all_output_conv3', t)
+		    	saveImageAll(unpackBuffer(predictor_conv2.output):select(2,1), 'all_output_conv2', t)
+		    	saveImageAll(unpackBuffer(encoder_lstm0.output):select(2,1), 'all_output_lstm0', t)
+		    	saveImageAll(unpackBuffer(encoder_lstm1.output):select(2,1), 'all_output_lstm1', t)
+				--[[
+    			local dd = image.toDisplayTensor{input=unpackBuffer(prediction):select(2,1),
+                           padding=0.4,
+                           nrow= 1,
+                           }
+ 				local dd = image.toDisplayTensor{input=unpackBuffer(target_predictor):select(2,1),
+                           padding=0.4,
+                           nrow= 1,
+                           }
+                ]]--
+		    	saveImageAll(unpackBuffer(prediction):select(2,1), 'all_prediction', t)
+
+
+		    	saveImageAll(unpackBuffer(target_predictor):select(2,1), 'all_target', t)
+
+		    	saveImageSequence(predictor_conv3.output,'seq_output_conv3', t)
+		    	saveImageSequence(predictor_conv2.output,'seq_output_conv2', t)
+		    	saveImageSequence(encoder_lstm0.output,'seq_output_lstm0', t)
+		    	saveImageSequence(encoder_lstm1.output,'seq_output_lstm1', t)
+
+		    	saveImageDepth(predictor_conv3.output,'dep_output_conv3', t)
+		    	saveImageDepth(predictor_conv2.output,'dep_output_conv2', t)
+		    	saveImageDepth(encoder_lstm0.output,'dep_output_lstm0', t)
+		    	saveImageDepth(encoder_lstm1.output,'dep_output_lstm1', t)
+
+		    	saveImageSequence(predictor_conv3.cells,'seq_cells_conv3', t)
+		    	saveImageSequence(predictor_conv2.cells,'seq_cells_conv2', t)
+		    	saveImageSequence(encoder_lstm0.cells,'seq_cells_lstm0', t)
+		    	saveImageSequence(encoder_lstm1.cells,'seq_cells_lstm1', t)
+
+		    	saveImageDepth(predictor_conv3.cells,'dep_cells_conv3', t)
+		    	saveImageDepth(predictor_conv2.cells,'dep_cells_conv2', t)
+		    	saveImageDepth(encoder_lstm0.cells,'dep_cells_lstm0', t)
+		    	saveImageDepth(encoder_lstm1.cells,'dep_cells_lstm1', t)
+		    	
+		    	saveImage(unpackBuffer(prediction), 'output', t)
+		    	saveImage(unpackBuffer(target_predictor), 'target', t)
+			end
+
+			local toc = torch.toc(tic)
+			print('time used: ',toc)
+		    if t < 5 then
+		    	checkMemory('after iter', gpuid)
+		    end
+			collectgarbage()
+		    if t < 5 then
+		    	checkMemory('after collectgarbage', gpuid)
+		    end
+	end
+end
+
+-----------------------------------
+function runtest2.hkotraning_ori()
 
 	local gpuid = selectFreeGpu()
 	local data_path
@@ -376,8 +969,27 @@ function runtest.hkotraning()
 	    target_predictor = torch.Tensor((opt.output_nSeq), opt.batchSize, opt.nFiltersMemory[1], opt.inputSizeH, opt.inputSizeW):normal(1, 0.1)
 
 	    criterion = nn.MSECriterion()
+	    
+		    local p1, g = encoder:getParameters()
+		    print('encoder weight: ', p1:mean())
+		--    p:uniform(-0.08,0.08)
+		    local p, g = predictor:getParameters()
+		--    p:uniform(-0.08,0.08)
+			-- p:copy(p1)
+		    print('predictior weight: ', p:mean())
+			print('lstm weight init: p:copy(p1):mul(1/2)')
+		--    local p, g = encoder_predictor:getParameters()
+		--    p:uniform(-0.08,0.08)
+		--    print('encoder_predictor weight: ', p:mean())
 
-		for t =1, 30000 do
+		for t =1, 32000 do
+			if t == 10000 then
+				opt.lr = opt.lr * 0.1
+			end
+			if t == 20000 then
+				opt.lr = opt.lr * 0.1
+			end
+
 		    print('==>'.." online epoch # " .. epoch .. ' [batchSize = ' .. opt.batchSize .. ']')
 		    local tic = torch.tic()
 		    
@@ -387,6 +999,16 @@ function runtest.hkotraning()
 		    if t < 5 then
 		    	checkMemory('start iter', gpuid)
 		    end
+		    local p, g = encoder:getParameters()
+		    print('encoder weight: ', p:mean())
+		    --p:uniform(-0.08,0.08)
+		    local p, g = predictor:getParameters()
+		    --p:uniform(-0.08,0.08)
+		    print('predictior weight: ', p:mean())
+		    local p, g = encoder_predictor:getParameters()
+		    --p:uniform(-0.08,0.08)
+		    print('encoder_predictor weight: ', p:mean())
+
 		    input_encoder = trainData[1]
 		    --input_encoder = trainData[1]:narrow(1, 1, opt.input_nSeq - 1) -- dimension1, from index 1, size = input_nSeq - 1
 		    --input_predictor = trainData[1]:narrow(1, opt.input_nSeq, 1) 
@@ -415,17 +1037,6 @@ function runtest.hkotraning()
 			-- thre = thre:cuda()
 			mask = mask:cuda()
 	    end
---[[
-    	    local parameters_encoder, gradParameters_encoder = encoder:getParameters()
-		    assert(parameters_encoder, 'parameters_encoder empty') 
-		    print('encoder parameters mean: ', parameters_encoder:mean())
-
-    	    local parameters, gradParameters = predictor:getParameters()
-		    print('predictor parameters mean: ', parameters:mean())
-
-    	    parameters, gradParameters = encoder_predictor:getParameters()
-		    print('encoder_predictor parameters mean: ', parameters:mean())
-]]--
 
 		    encoder_lstm1.module:zeroGradParameters()
 		    encoder_lstm0.module:zeroGradParameters()
@@ -435,26 +1046,8 @@ function runtest.hkotraning()
 		    encoder_predictor:zeroGradParameters()
 
 		    encoder:zeroGradParameters()
-		    --[[print(encoder.module)
-		    mlp = nn.Sequential():add(nn.Linear(2,3))
-		    local pa, gra = mlp.modules[1]:getParameters()
-		    gra:fill(2)
-		    mlp:zeroGradParameters()
-		    mytester:assert(gra:mean() == 0)
-		    ]]--
-		    -- encoder_lstm0:zeroGradParameters()
-		   
-		    -- mytester:assert(gradParameters_encoder:mean() == 0, 'mean is '..gradParameters_encoder:mean())
-		    -- mytester:assert(gradParameters_encoder:mean() == 0, 'mean is '..gradParameters_encoder:mean())
-		    --mytester:assert(g_encoder_lstm1:mean() == 0, 'mean is '..g_encoder_lstm1:mean())
-		    
-		    -- encoder:type(defaultType)
-		    predictor:zeroGradParameters()
 
-		    --mytester:assert(g_predictor_conv2:mean() == 0, 'mean is '..g_predictor_conv2:mean())
-		    -- mytester:assert(g_encoder_lstm1:mean() == 0, 'mean is '..g_encoder_lstm1:mean())
-		    
-		    -- predictor:type(defaultType)
+		    predictor:zeroGradParameters()
 
 		    local output_encoder = encoder:forward(input_encoder)
 
@@ -463,20 +1056,10 @@ function runtest.hkotraning()
 		    predictor_conv2.initOutput = encoder_lstm0.lastOutput
 		    predictor_conv3.initOutput = encoder_lstm1.lastOutput
 
-		    --[[
-		    local predictor_conv2_output = predictor_conv2:forward(input_predictor)
-		    mytester:assert(output:size(1) == opt.output_nSeq*opt.batchSize)
-		    mytester:assert(output:size(2) == opt.nFiltersMemory[2])
-		    mytester:assert(output:size(3) == opt.inputSizeH)
-		    -- print(predictor_conv3.module)
-		    output = predictor_conv3:forward(output)
-]]--
-			--print('predictor')
+
 			output_predictor = predictor:forward(input_predictor)
 		    target_predictor = packBuffer(target_predictor)
   
-		    --mytester:assert(output_predictor:size(1) == target_predictor:size(1))
-		    --mytester:assert(output_predictor:size(2) == target_predictor:size(2))
 		    mytester:assert(output_predictor:size(3) == target_predictor:size(3))
 		    mytester:assert(output_predictor:size(4) == target_predictor:size(4))
 
@@ -501,7 +1084,7 @@ function runtest.hkotraning()
 		    -- *******************************
 		    input_encoder_predictor = packBuffer(input_encoder_predictor)
 		    prediction = encoder_predictor:forward(input_encoder_predictor)
-		    prediction:clamp(0, 1)
+		    -- prediction:clamp(0, 1)
 		    -- unpackBuffer(input_encoder_predictor)
 		    print('prediction max and min:', prediction:max(), prediction:min(), prediction:mean())
 		    print('target max and min:', target_predictor:max(), target_predictor:min(), target_predictor:mean())
@@ -525,7 +1108,7 @@ function runtest.hkotraning()
 		    local encoder_lstm0_grad_output = grad_input_encoder_predictor[{{1},{},{1, opt.nFiltersMemory[2]},{},{}}]
 		    local encoder_lstm1_grad_output = grad_input_encoder_predictor[{{1},{},{1 + opt.nFiltersMemory[2], 2*opt.nFiltersMemory[2]},{},{}}]
 		    local predictor_conv2_grad_output = grad_input_encoder_predictor[{{2, opt.output_nSeq},{},{1, opt.nFiltersMemory[2]},{},{}}]
-		    local predictor_conv3_grad_output = grad_input_encoder_predictor[{{2, opt.output_nSeq},{},{1 + opt.nFiltersMemory[2], 2*	opt.nFiltersMemory[2]},{},{}}]
+		    local predictor_conv3_grad_output = grad_input_encoder_predictor[{{2, opt.output_nSeq},{},{1 + opt.nFiltersMemory[2], 2*opt.nFiltersMemory[2]},{},{}}]
 
 		    encoder_lstm0_grad_output = packBuffer(encoder_lstm0_grad_output)
 		    encoder_lstm1_grad_output = packBuffer(encoder_lstm1_grad_output)
@@ -554,17 +1137,17 @@ function runtest.hkotraning()
 		    encoder_lstm1.gradPrevCell = predictor_conv3.gradPrevCell
 		    encoder_lstm1:maxBackWard(encoder_lstm0.output, predictor_conv3.lastGradPrevOutput)
 		    local lr = opt.lr or 1e-6
-		    --[[
-			momentumUpdateParameters(encoder_lstm1, lr)
-			momentumUpdateParameters(encoder_lstm0, lr)
-			momentumUpdateParameters(predictor_conv2, lr)
-			momentumUpdateParameters(predictor_conv3, lr)
+	--[[		    
+			momentumUpdateParameters(encoder_lstm1.module, lr)
+			momentumUpdateParameters(encoder_lstm0.module, lr)
+			momentumUpdateParameters(predictor_conv2.module, lr)
+			momentumUpdateParameters(predictor_conv3.module, lr)
 			momentumUpdateParameters(encoder_predictor, lr)
-			]]--
-			encoder_lstm1:updateParameters(lr)
-			encoder_lstm0:updateParameters(lr)
-			predictor_conv2:updateParameters(lr)
-			predictor_conv3:updateParameters(lr)
+	]]--	
+			encoder_lstm1.module:updateParameters(lr*10)
+			encoder_lstm0.module:updateParameters(lr*10)
+			predictor_conv2.module:updateParameters(lr)
+			predictor_conv3.module:updateParameters(lr)
 			encoder_predictor:updateParameters(lr)
 
 			-- weightVis(encoder_predictor, 'encoder_predictor_weight', t)
@@ -577,92 +1160,74 @@ function runtest.hkotraning()
 		    if math.fmod(t, opt.saveInterval) == 1 or t == 1 then
 		    	-- print(output:size())
 		    	print('save')
-		    	saveImageSequence(packBuffer(grad_input_encoder_predictor),'seq_encoder_predictor_grad_input', t)
-		    	saveImageDepth(packBuffer(grad_input_encoder_predictor),'dep_encoder_predictor_grad_input', t)
-		    	saveImageSequence(encoder_lstm0_grad_output,'seq_lstm0_grad_output', t)
-		    	saveImageDepth(encoder_lstm0_grad_output,'dep_lstm0_grad_output', t)
-		    	saveImageSequence(encoder_lstm1_grad_output,'seq_lstm1_grad_output', t)
-		    	saveImageDepth(encoder_lstm1_grad_output,'dep_lstm1_grad_output', t)
-		    	saveImageSequence(predictor_conv2_grad_output,'seq_conv2_grad_output', t)
-		    	saveImageDepth(predictor_conv2_grad_output,'dep_conv2_grad_output', t)
-		    	saveImageSequence(predictor_conv3_grad_output,'seq_conv3_grad_output', t)
-		    	saveImageDepth(predictor_conv3_grad_output,'dep_conv3_grad_output', t)
-		    	saveImageSequence(input_encoder_predictor, 'dep_input_encoder_predictor', t)
-		    	saveImageSequence(predictor_conv3.output,'seq_output_conv3', t)
-		    	saveImageSequence(predictor_conv2.output,'seq_output_conv2', t)
-		    	saveImageSequence(encoder_lstm0.output,'seq_output_lstm0', t)
-		    	saveImageSequence(encoder_lstm1.output,'seq_output_lstm1', t)
-
-		    	saveImageDepth(predictor_conv3.output,'dep_output_conv3', t)
-		    	saveImageDepth(predictor_conv2.output,'dep_output_conv2', t)
-		    	saveImageDepth(encoder_lstm0.output,'dep_output_lstm0', t)
-		    	saveImageDepth(encoder_lstm1.output,'dep_output_lstm1', t)
-
-		    	saveImageSequence(predictor_conv3.cells,'seq_cells_conv3', t)
-		    	saveImageSequence(predictor_conv2.cells,'seq_cells_conv2', t)
-		    	saveImageSequence(encoder_lstm0.cells,'seq_cells_lstm0', t)
-		    	saveImageSequence(encoder_lstm1.cells,'seq_cells_lstm1', t)
-
-		    	saveImageDepth(predictor_conv3.cells,'dep_cells_conv3', t)
-		    	saveImageDepth(predictor_conv2.cells,'dep_cells_conv2', t)
-		    	saveImageDepth(encoder_lstm0.cells,'dep_cells_lstm0', t)
-		    	saveImageDepth(encoder_lstm1.cells,'dep_cells_lstm1', t)
-		    	
-		    
-		    	saveImage(unpackBuffer(prediction), 'output', t)
-		    	saveImage(unpackBuffer(target_predictor), 'target', t)
-
 		    	--[[
-		    	saveImage(output_encoder, 'output_encoder', t)
-		    	prediction = unpackBuffer(prediction)
-		    	target_predictor = unpackBuffer(target_predictor)
-		    	-- encoder_lstm0.output = unpackBuffer(encoder_lstm0.output)
-		    	-- predictor_conv2_grad_output = unpackBuffer(predictor_conv2_grad_output)
-		    	-- predictor_conv3_grad_output = unpackBuffer(predictor_conv3_grad_output)
-		    	-- encoder_lstm0_grad_output = unpackBuffer(encoder_lstm0_grad_output)
-		    	-- encoder_lstm1_grad_output = unpackBuffer(encoder_lstm1_grad_output)
-		    	-- saveImage(predictor_conv2.output, 'predictor_conv2.output', t, nil,nil,nil,true)
-		    	saveImage(grad_input_encoder_predictor,'grad_input_encoder_predictor', t)
+		    	saveImageSequence(packBuffer(grad_input_encoder_predictor),'seq_encoder_predictor_grad_input', t, epochSaveDir)
+		    	saveImageDepth(packBuffer(grad_input_encoder_predictor),'dep_encoder_predictor_grad_input', t, epochSaveDir)
+		    	saveImageSequence(encoder_lstm0_grad_output,'seq_lstm0_grad_output', t, epochSaveDir)
+		    	saveImageDepth(encoder_lstm0_grad_output,'dep_lstm0_grad_output', t, epochSaveDir)
+		    	saveImageSequence(encoder_lstm1_grad_output,'seq_lstm1_grad_output', t, epochSaveDir)
+		    	saveImageDepth(encoder_lstm1_grad_output,'dep_lstm1_grad_output', t, epochSaveDir)
+		    	saveImageSequence(predictor_conv2_grad_output,'seq_conv2_grad_output', t, epochSaveDir)
+		    	saveImageDepth(predictor_conv2_grad_output,'dep_conv2_grad_output', t, epochSaveDir)
+		    	saveImageSequence(predictor_conv3_grad_output,'seq_conv3_grad_output', t, epochSaveDir)
+		    	saveImageDepth(predictor_conv3_grad_output,'dep_conv3_grad_output', t, epochSaveDir)
+				]]--
+		    	local allin = unpackBuffer(input_encoder_predictor)
 
-		    	saveImage(encoder_lstm0_grad_output:view(opt.input_nSeq, opt.batchSize, 
-		    									opt.nFiltersMemory[2]*opt.inputSizeH, opt.inputSizeW):select(1, opt.input_nSeq),'depth_encoder_lstm0_gradOutput', t)
-		    	saveImage(encoder_lstm1_grad_output:view(opt.input_nSeq, opt.batchSize, 
-		    									opt.nFiltersMemory[2]*opt.inputSizeH, opt.inputSizeW):select(1, opt.input_nSeq),'depth_encoder_lstm1_gradOutput', t)
+		    	allin = makeContiguous(allin:select(2, 1))
+		    	saveImageAll(allin, 'allin', t, epochSaveDir)
+		    	-- allin = allin:resize(allin:size(1) * allin:size(2), allin:size(2)*allin:size(4))
+		    	-- saveImageSequence(input_encoder_predictor, 'dep_input_encoder_predictor', t)
+				-- print('sizei of all in ', allin:size())
+		    	-- saveImage(allin, 'allin', t)
 
-		    	saveImage(predictor_conv3.output:view(opt.output_nSeq - 1, opt.batchSize, 
-		    									opt.nFiltersMemory[2]*opt.inputSizeH, opt.inputSizeW):select(1, opt.output_nSeq - 1), 'depth_predictor_conv3_output', t)
-		    	saveImage(predictor_conv2.output:view(opt.output_nSeq - 1, opt.batchSize, 
-		    									opt.nFiltersMemory[2]*opt.inputSizeH, opt.inputSizeW):select(1, opt.output_nSeq - 1), 'depth_predictor_conv3_output', t)
-		    	saveImage(encoder_lstm1.output:view(opt.input_nSeq, opt.batchSize, 
-		    									opt.nFiltersMemory[2]*opt.inputSizeH, opt.inputSizeW):select(1, opt.input_nSeq), 'depth_encoder_lstm1_output', t)
-		    	saveImage(encoder_lstm0.output:view(opt.input_nSeq, opt.batchSize, 
-		    									opt.nFiltersMemory[2]*opt.inputSizeH, opt.inputSizeW):select(1, opt.input_nSeq), 'depth_encoder_lstm0_output', t)
+		    	saveImageAll(unpackBuffer(predictor_conv3.output):select(2,1), 'all_output_conv3', t, epochSaveDir)
+		    	saveImageAll(unpackBuffer(predictor_conv2.output):select(2,1), 'all_output_conv2', t, epochSaveDir)
+		    	saveImageAll(unpackBuffer(encoder_lstm0.output):select(2,1), 'all_output_lstm0', t, epochSaveDir)
+		    	saveImageAll(unpackBuffer(encoder_lstm1.output):select(2,1), 'all_output_lstm1', t, epochSaveDir)
+		    	saveImageAll(unpackBuffer(predictor_conv3.lastGradPrevOutput):select(2,1), 'all_lstm1_grad_output', t, epochSaveDir)
+		    	saveImageAll(unpackBuffer(predictor_conv2.lastGradPrevOutput):select(2,1), 'all_lstm0_grad_output', t, epochSaveDir)
 
-		    	saveImage(predictor_conv2_grad_output:view(opt.input_nSeq, opt.batchSize, 
-		    									opt.nFiltersMemory[2]*opt.inputSizeH, opt.inputSizeW):select(1, opt.input_nSeq),'depth_predictor_conv2_gradOutput', t)
-		    	saveImage(predictor_conv3_grad_output:view(opt.input_nSeq, opt.batchSize, 
-		    									opt.nFiltersMemory[2]*opt.inputSizeH, opt.inputSizeW):select(1, opt.input_nSeq), 'depth_predictor_conv3_gradOutput', t)
+		    	saveImageAll(unpackBuffer(prediction):select(2,1)[{{2, opt.outputSize},{},{},{}}], 'all_prediction2', t, epochSaveDir)
 
+		    	saveImageAll(unpackBuffer(prediction):select(2,1), 'all_prediction', t, epochSaveDir)
+		    	saveImageAll(unpackBuffer(predictor_conv2_grad_output):select(2,1), 'all_conv2_grad_output', t, epochSaveDir)
+		    	saveImageAll(unpackBuffer(predictor_conv3_grad_output):select(2,1), 'all_conv3_grad_output', t, epochSaveDir)
 
-		    	saveImage(predictor_conv3.cells, 'predictor_conv3_cell', t, nil,nil,nil,true)
+		    	saveImageAll(unpackBuffer(target_predictor):select(2,1), 'all_target', t, epochSaveDir)
+--[[
+		    	saveImageSequence(predictor_conv3.output,'seq_output_conv3', t, epochSaveDir)
+		    	saveImageSequence(predictor_conv2.output,'seq_output_conv2', t, epochSaveDir)
+		    	saveImageSequence(encoder_lstm0.output,'seq_output_lstm0', t, epochSaveDir)
+		    	saveImageSequence(encoder_lstm1.output,'seq_output_lstm1', t, epochSaveDir)
 
-		    	-- saveImage(predictor_conv2.cells, 'predictor_conv3_cell', t, nil,nil,nil,true)
+		    	saveImageDepth(predictor_conv3.output,'dep_output_conv3', t, epochSaveDir)
+		    	saveImageDepth(predictor_conv2.output,'dep_output_conv2', t, epochSaveDir)
+		    	saveImageDepth(encoder_lstm0.output,'dep_output_lstm0', t, epochSaveDir)
+		    	saveImageDepth(encoder_lstm1.output,'dep_output_lstm1', t, epochSaveDir)
+]]--
+		    	saveImageAll(unpackBuffer(predictor_conv3.cells):select(2,1), 'all_cells_conv3', t, epochSaveDir)
+		    	saveImageAll(unpackBuffer(predictor_conv2.cells):select(2,1), 'all_cells_conv2', t, epochSaveDir)
+		    	saveImageAll(unpackBuffer(encoder_lstm0.cells):select(2,1), 'all_cells_lstm0', t, epochSaveDir)
+		    	saveImageAll(unpackBuffer(encoder_lstm1.cells):select(2,1), 'all_cells_lstm1', t, epochSaveDir)
+--[[
+		    	saveImageSequence(predictor_conv3.cells,'seq_cells_conv3', t, epochSaveDir)
+		    	saveImageSequence(predictor_conv2.cells,'seq_cells_conv2', t, epochSaveDir)
+		    	saveImageSequence(encoder_lstm0.cells,'seq_cells_lstm0', t, epochSaveDir)
+		    	saveImageSequence(encoder_lstm1.cells,'seq_cells_lstm1', t, epochSaveDir)
 
-		    	saveImage(encoder_lstm1.output, 'encoder_lstm1.output', t, nil,nil,nil,true)
+		    	saveImageDepth(predictor_conv3.cells,'dep_cells_conv3', t, epochSaveDir)
+		    	saveImageDepth(predictor_conv2.cells,'dep_cells_conv2', t, epochSaveDir)
+		    	saveImageDepth(encoder_lstm0.cells,'dep_cells_lstm0', t, epochSaveDir)
+		    	saveImageDepth(encoder_lstm1.cells,'dep_cells_lstm1', t, epochSaveDir)
+	]]--	    
+			    saveImage(unpackBuffer(prediction), 'output', t, epochSaveDir)
 
-		    	saveImage(encoder_lstm0.output, 'encoder_lstm0_output', t)
-		    	saveImage(prediction, 'output', t)
-		    	saveImage(target_predictor, 'target', t)
-		    	saveImage(input_encoder_predictor, 'input_encoder_predictor',t, nil,nil,nil,true)
-		    	-- encoder_lstm0.output = packBuffer(encoder_lstm0.output)
-		    	-- encoder_lstm0_grad_output = packBuffer(encoder_lstm0_grad_output)
-		    	-- encoder_lstm1_grad_output = packBuffer(encoder_lstm1_grad_output)
+		    	saveImage(unpackBuffer(prediction:add(-prediction:min()):div(prediction:max() - prediction:min())), 'output', t, epochSaveDir)
 
-		    	prediction = packBuffer(prediction)
-		    	target_predictor = packBuffer(target_predictor)
-				]]
-		    	-- saveImage(gradInput, 'gradInput', t)
-		    	-- { Tensor(batch * depth * h * w), Tensor(batch * depth * h * w), Tensor(batch * depth * h * w), }
+	--	    	saveImage(unpackBuffer(prediction), 'output', t, epochSaveDir)
+		    	saveImage(unpackBuffer(target_predictor), 'target', t, epochSaveDir)
+
 			end
 			local toc = torch.toc(tic)
 			print('time used: ',toc)
@@ -706,24 +1271,24 @@ end
 
 function runtest.StepConvLSTM()
 	
-	inputSize = 3
-	outputSize = 4
-	bufferStep = 5
-	kernelSizeIn = 3
-	kernelSizeMem = 3
-	stride = 1
-	batchSize = 8 
-	height = 10
-	width = 10
-	defaultType = 'nn.DoubleTensor'
+	local inputSize = 3
+	local outputSize = 4
+	local bufferStep = 5
+	local kernelSizeIn = 3
+	local kernelSizeMem = 3
+	local stride = 1
+	local batchSize = 8 
+	local height = 10
+	local width = 10
+	local defaultType = 'nn.DoubleTensor'
 
-	net = nn.StepConvLSTM(inputSize, outputSize, bufferStep, kernelSizeIn, kernelSizeMem, stride, batchSize, height, width, defaultType)
+	local net = nn.StepConvLSTM(inputSize, outputSize, bufferStep, kernelSizeIn, kernelSizeMem, stride, batchSize, height, width, defaultType)
 
-	input = torch.randn(bufferStep * batchSize, inputSize, height, width)
+	local input = torch.randn(bufferStep * batchSize, inputSize, height, width)
 	for i = 1, 3 do
 		output = net:forward(input)
 		output = net:unpackBuffer(output)
-		mytester:assertTensorEq(output, net.debugBuffer)
+		-- mytester:assertTensorEq(output, net.debugBuffer)
 	end
 	gradOutput = torch.randn(bufferStep * batchSize, outputSize, height, width)
 
@@ -779,6 +1344,48 @@ function runtest.weightVis()
 	print('save image test')
 	weightVis(net, 'test', 0, './')
 end
+
+function runtest.HadamardMul()
+	local inputSize = 3
+	local batchSize = 1
+	local h = 2
+	local w = 2
+	local net = nn.HadamardMul(inputSize)
+	local input = torch.randn(batchSize * inputSize * h * w):resize(batchSize, inputSize, h, w)
+	local output = net:forward(input)
+	mytester:assertTensorNe(output, input)
+	local original_w = net.weight:clone()
+	print(original_w:mean())
+
+	-- cal gradient
+	net:zeroGradParameters()
+	local p, g = net:getParameters()
+	mytester:assert(g:sum() == 0, 'zeroGradParameters fail')
+
+	net:backward(input, output, 1000)
+	print('input', input)
+	print('output', output)
+	mytester:assertTensorNe(output, input, 'forward get output fail')
+
+	mytester:assert(g:sum() ~= 0, 'backward update gradParameters fail')
+
+	-- update parameters
+	net:updateParameters(10)
+	local p, g = net:getParameters()
+
+	print(p:mean())
+	mytester:assertTensorNe(p, original_w, 'updateParameters fail')
+
+	-- forward test2
+	net.weight:fill(1)
+	output = net:forward(input)
+	mytester:assertTensorEq(output, input, 'forward fail')
+	net:zeroGradParameters()
+	net:backward(input, output:zero()) -- input == output, gradent = 0	
+	mytester:assert(g:sum() == 0, 'calculate gradParameters incorrectly')
+end
+
+
 mytester = torch.Tester()
 mytester:add(runtest)
 -- math.randomseed(os.time())
