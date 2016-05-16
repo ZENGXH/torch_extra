@@ -118,9 +118,11 @@ function getdataSeq_hko(mode, data_path)
          ------------- input seq ------------
          for k = 1,  opt.input_nSeq do
             local out = image.load(data_path..'data/'..fileList[lineInd])
+            image.scale(out, 50, 50)
             -- print('select start from ',  fileList[lineInd])
             --local out = dataMask:quick4Mask3Dforward(ori)
             -- out = image.rotate(out, 1.5)
+            print('input_batch', input_batch:size())
             input_batch[batch_ind][k] = out:clone()
             lineInd = lineInd + selectStep
                         --epochSaveDir = 'image/testout/'..'train-epoch'..tostring(0)..'/'
@@ -131,6 +133,8 @@ function getdataSeq_hko(mode, data_path)
          ------------- output seq ------------
          for k = 1,  opt.output_nSeq do
             local out = image.load(data_path..'data/'..fileList[lineInd])
+                        image.scale(out, 50, 50)
+
             --local out = dataMask:quick4Mask3Dforward(ori)
             -- out = image.rotate(out, 1.5)
             output_batch[batch_ind][k] = out:clone()
@@ -300,10 +304,15 @@ function getdataTensor_hko(mode, data_path)
          ------------- input seq ------------
          for k = 1,  opt.input_nSeq do
             local out = image.load(data_path..'data/'..fileList[lineInd])
+            out = image.scale(out, opt.imageH, opt.imageW)
             -- print('select start from ',  fileList[lineInd])
             --local out = dataMask:quick4Mask3Dforward(ori)
             -- out = image.rotate(out, 1.5)
-            input_batch[k][batch_ind] = out:clone()
+                        print('inputbatch', out:size(), input_batch:size())
+
+            assert(out:size(2) == input_batch:size(4), 'dimension mismatch, get '..out:size(2)..' and '..input_batch:size(3))
+            print('inputbatch', out:size())
+            input_batch[k][batch_ind][1] = out:clone()
             lineInd = lineInd + selectStep
                         --epochSaveDir = 'image/testout/'..'train-epoch'..tostring(0)..'/'
                         --image.save(epochSaveDir..fileList[lineInd],  out)
@@ -314,6 +323,9 @@ function getdataTensor_hko(mode, data_path)
          for k = 1,  opt.output_nSeq do
             
             local out = image.load(data_path..'data/'..fileList[lineInd])
+                        image.scale(out, 50, 50)
+            out = image.scale(out, opt.imageH, opt.imageW)
+
             --local out = dataMask:quick4Mask3Dforward(ori)
             -- out = image.rotate(out, 1.5)
             output_batch[k][batch_ind] = out:clone()
